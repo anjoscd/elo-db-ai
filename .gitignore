@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+# ELO stores knowledge locally; never commit a real store
+.elo/
+*.db
+*.db-wal
+*.db-shm
+# private benchmark data
+bench/private/
+.DS_Store
+.base-ast/
