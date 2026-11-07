@@ -1,0 +1,10 @@
+{
+  "name": "synthetic-lantern",
+  "private": true,
+  "workspaces": [
+    "api",
+    "web",
+    "billing",
+    "services/notify"
+  ]
+}

@@ -1,0 +1,2343 @@
+{
+  "commit": "3b38534e6815150d8bdc5f85625e33dc15665a46",
+  "date": "2026-03-01T12:00:00+00:00",
+  "date_source": "max(event.now)",
+  "split": "test",
+  "nonce_seed": "454c4f5f42454e43",
+  "selectors": [
+    {
+      "selector": "B0",
+      "summary": {
+        "events": 48,
+        "rates": {
+          "abstention_accuracy": {
+            "mean": 1.0,
+            "included_events": 8,
+            "excluded_events": 40
+          },
+          "forbidden_rate": {
+            "mean": 0.0,
+            "included_events": 48,
+            "excluded_events": 0
+          },
+          "law_full_coverage": {
+            "mean": 0.0,
+            "included_events": 8,
+            "excluded_events": 40
+          },
+          "relevance_precision": {
+            "mean": null,
+            "included_events": 0,
+            "excluded_events": 48
+          },
+          "required_full_recall": {
+            "mean": 0.0,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "required_reachable_recall": {
+            "mean": 0.0,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "required_session_recall": {
+            "mean": 0.0,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "scope_violation_rate": {
+            "mean": null,
+            "included_events": 0,
+            "excluded_events": 48
+          }
+        },
+        "supersession_leaks": {
+          "mean": 0.0,
+          "included_events": 48,
+          "excluded_events": 0
+        },
+        "supersession_leaks_total": 0,
+        "bytes_p50": 0,
+        "bytes_p95": 0
+      },
+      "events": [
+        {
+          "event_id": "abstention-4-1",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-4-2",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-4-3",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-4-4",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-1",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-2",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-3",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-4",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "explicit_project-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "local_release-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 0.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "supersession-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        }
+      ]
+    },
+    {
+      "selector": "B1",
+      "summary": {
+        "events": 48,
+        "rates": {
+          "abstention_accuracy": {
+            "mean": 0.5,
+            "included_events": 8,
+            "excluded_events": 40
+          },
+          "forbidden_rate": {
+            "mean": 0.4166666666666667,
+            "included_events": 48,
+            "excluded_events": 0
+          },
+          "law_full_coverage": {
+            "mean": 1.0,
+            "included_events": 8,
+            "excluded_events": 40
+          },
+          "relevance_precision": {
+            "mean": 0.4527777777777778,
+            "included_events": 36,
+            "excluded_events": 12
+          },
+          "required_full_recall": {
+            "mean": 0.8,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "required_reachable_recall": {
+            "mean": 0.8,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "required_session_recall": {
+            "mean": 0.8,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "scope_violation_rate": {
+            "mean": 0.36458333333333326,
+            "included_events": 36,
+            "excluded_events": 12
+          }
+        },
+        "supersession_leaks": {
+          "mean": 0.375,
+          "included_events": 48,
+          "excluded_events": 0
+        },
+        "supersession_leaks_total": 18,
+        "bytes_p50": 411,
+        "bytes_p95": 827
+      },
+      "events": [
+        {
+          "event_id": "abstention-4-1",
+          "rates": {
+            "abstention_accuracy": 0.0,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.0,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": 1.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 688
+        },
+        {
+          "event_id": "abstention-4-2",
+          "rates": {
+            "abstention_accuracy": 0.0,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.0,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": 0.625
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 783
+        },
+        {
+          "event_id": "abstention-4-3",
+          "rates": {
+            "abstention_accuracy": 0.0,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.0,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": 1.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 187
+        },
+        {
+          "event_id": "abstention-4-4",
+          "rates": {
+            "abstention_accuracy": 0.0,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.0,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": 1.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 321
+        },
+        {
+          "event_id": "abstention-5-1",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-2",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-3",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-4",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 0.0,
+            "required_session_recall": 0.0,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "database-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "database-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 411
+        },
+        {
+          "event_id": "explicit_project-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.5,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 443
+        },
+        {
+          "event_id": "explicit_project-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.5,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 443
+        },
+        {
+          "event_id": "explicit_project-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "local_release-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 649
+        },
+        {
+          "event_id": "local_release-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 649
+        },
+        {
+          "event_id": "local_release-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 649
+        },
+        {
+          "event_id": "local_release-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.3333333333333333,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.6666666666666666
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 649
+        },
+        {
+          "event_id": "local_release-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.625,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.375
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 827
+        },
+        {
+          "event_id": "local_release-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.625,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.375
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 827
+        },
+        {
+          "event_id": "local_release-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.625,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.375
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 827
+        },
+        {
+          "event_id": "local_release-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 0.625,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.375
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 827
+        },
+        {
+          "event_id": "supersession-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        },
+        {
+          "event_id": "supersession-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 1.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 2,
+          "used_bytes": 501
+        }
+      ]
+    },
+    {
+      "selector": "E1",
+      "summary": {
+        "events": 48,
+        "rates": {
+          "abstention_accuracy": {
+            "mean": 1.0,
+            "included_events": 8,
+            "excluded_events": 40
+          },
+          "forbidden_rate": {
+            "mean": 0.0,
+            "included_events": 48,
+            "excluded_events": 0
+          },
+          "law_full_coverage": {
+            "mean": 1.0,
+            "included_events": 8,
+            "excluded_events": 40
+          },
+          "relevance_precision": {
+            "mean": 0.7777777777777778,
+            "included_events": 12,
+            "excluded_events": 36
+          },
+          "required_full_recall": {
+            "mean": 0.25,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "required_reachable_recall": {
+            "mean": 1.0,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "required_session_recall": {
+            "mean": 1.0,
+            "included_events": 40,
+            "excluded_events": 8
+          },
+          "scope_violation_rate": {
+            "mean": 0.0,
+            "included_events": 40,
+            "excluded_events": 8
+          }
+        },
+        "supersession_leaks": {
+          "mean": 0.0,
+          "included_events": 48,
+          "excluded_events": 0
+        },
+        "supersession_leaks_total": 0,
+        "bytes_p50": 206,
+        "bytes_p95": 364
+      },
+      "events": [
+        {
+          "event_id": "abstention-4-1",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-4-2",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-4-3",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-4-4",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-1",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-2",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-3",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "abstention-5-4",
+          "rates": {
+            "abstention_accuracy": 1.0,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": null,
+            "required_reachable_recall": null,
+            "required_session_recall": null,
+            "scope_violation_rate": null
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 0
+        },
+        {
+          "event_id": "code_signal-1-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 283
+        },
+        {
+          "event_id": "code_signal-1-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 162
+        },
+        {
+          "event_id": "code_signal-1-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 162
+        },
+        {
+          "event_id": "code_signal-1-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 162
+        },
+        {
+          "event_id": "code_signal-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 283
+        },
+        {
+          "event_id": "code_signal-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 162
+        },
+        {
+          "event_id": "code_signal-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 162
+        },
+        {
+          "event_id": "code_signal-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 162
+        },
+        {
+          "event_id": "database-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 199
+        },
+        {
+          "event_id": "database-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 150
+        },
+        {
+          "event_id": "database-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 150
+        },
+        {
+          "event_id": "database-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 150
+        },
+        {
+          "event_id": "database-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 199
+        },
+        {
+          "event_id": "database-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 150
+        },
+        {
+          "event_id": "database-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 150
+        },
+        {
+          "event_id": "database-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 150
+        },
+        {
+          "event_id": "explicit_project-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 231
+        },
+        {
+          "event_id": "explicit_project-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.0,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 314
+        },
+        {
+          "event_id": "explicit_project-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 231
+        },
+        {
+          "event_id": "explicit_project-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.6666666666666666,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 360
+        },
+        {
+          "event_id": "explicit_project-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 0.0,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 314
+        },
+        {
+          "event_id": "explicit_project-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 231
+        },
+        {
+          "event_id": "explicit_project-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 231
+        },
+        {
+          "event_id": "local_release-4-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 271
+        },
+        {
+          "event_id": "local_release-4-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 206
+        },
+        {
+          "event_id": "local_release-4-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 206
+        },
+        {
+          "event_id": "local_release-4-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 206
+        },
+        {
+          "event_id": "local_release-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 543
+        },
+        {
+          "event_id": "local_release-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 270
+        },
+        {
+          "event_id": "local_release-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 270
+        },
+        {
+          "event_id": "local_release-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": 1.0,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 270
+        },
+        {
+          "event_id": "supersession-2-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 364
+        },
+        {
+          "event_id": "supersession-2-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 219
+        },
+        {
+          "event_id": "supersession-2-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 219
+        },
+        {
+          "event_id": "supersession-2-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 219
+        },
+        {
+          "event_id": "supersession-5-1",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": 1.0,
+            "required_full_recall": 1.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 364
+        },
+        {
+          "event_id": "supersession-5-2",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 219
+        },
+        {
+          "event_id": "supersession-5-3",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 219
+        },
+        {
+          "event_id": "supersession-5-4",
+          "rates": {
+            "abstention_accuracy": null,
+            "forbidden_rate": 0.0,
+            "law_full_coverage": null,
+            "relevance_precision": null,
+            "required_full_recall": 0.0,
+            "required_reachable_recall": 1.0,
+            "required_session_recall": 1.0,
+            "scope_violation_rate": 0.0
+          },
+          "supersession_leaks": 0,
+          "used_bytes": 219
+        }
+      ]
+    }
+  ]
+}

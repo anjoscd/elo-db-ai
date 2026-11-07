@@ -1,0 +1,35 @@
+[workspace]
+budget_bytes = 9000
+min_score = 0.35
+
+[[project]]
+name = "api"
+root = "api/"
+aliases = ["api"]
+
+[[project]]
+name = "web"
+root = "web/"
+aliases = ["web"]
+
+[[project]]
+name = "billing"
+root = "billing/"
+aliases = ["billing"]
+
+[[project]]
+name = "notify"
+root = "services/notify/"
+aliases = ["notify"]
+
+[[link]]
+name = "payments"
+projects = ["api", "billing"]
+keywords = ["checkout", "invoice", "settlement"]
+code_signals = ["@lantern/billing"]
+
+[[link]]
+name = "notifications"
+projects = ["api", "web", "notify"]
+keywords = ["receipt", "delivery", "notification"]
+code_signals = ["NOTIFY_URL"]

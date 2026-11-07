@@ -1,0 +1,8 @@
+{
+  "name": "@lantern/api",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@lantern/billing": "workspace:*"
+  }
+}
