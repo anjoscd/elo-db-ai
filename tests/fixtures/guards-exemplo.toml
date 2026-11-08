@@ -1,0 +1,67 @@
+
+# Travas (ELO 08/11): leis do dono conferidas antes de cada ferramenta.
+# Todas em modo sombra (sem enforce): só registram em .elo/shadow/guards.jsonl.
+# Para barrar de verdade, troque para enforce = true (decisão do dono).
+
+[[guard]]
+id = "copilot-sem-allow-all"
+law = "nota-0811-copilot-allow-tool"
+tool = "Bash"
+field = "command"
+all = ["copilot", "--allow-all-tools"]
+action = "deny"
+message = "nunca --allow-all-tools: liberar uma a uma com --allow-tool 'shell(cmd:*)'"
+
+[[guard]]
+id = "sem-segundo-plano"
+law = "lei-sem-segundo-plano"
+tool = "Bash"
+field = "run_in_background"
+all = ["true"]
+action = "deny"
+message = "nada roda por baixo: espera em primeiro plano, em fatias, para o agente aparecer ativo"
+
+[[guard]]
+id = "revisor-sem-hook-rs"
+law = "nota-revisor-sem-hook"
+tool = "Bash"
+field = "command"
+all = ["revisor-externo.sh", "src/hook.rs"]
+action = "deny"
+message = "não anexar src/hook.rs ao revisor externo (exemplos de segredo de propósito); pedir função pública e ligar no gancho"
+
+[[guard]]
+id = "push-so-com-ordem"
+law = "lei-0811-publicar-autorizacao"
+tool = "Bash"
+field = "command"
+all = ["git push"]
+action = "ask"
+message = "push só com a ordem do dono, a cada vez"
+
+[[guard]]
+id = "publicar-so-com-ordem"
+law = "lei-0811-publicar-autorizacao"
+tool = "Bash"
+field = "command"
+any = ["publicar-app.sh", "deploy-functions.sh", "fly deploy", "supabase db push"]
+action = "ask"
+message = "publicar (site, ao vivo, Edge Function, Fly, migration) só com a ordem do dono, a cada vez"
+
+[[guard]]
+id = "sem-linha-de-processo"
+law = "lei-sem-linha-de-processo"
+tool = "Bash"
+field = "command"
+any = ["pgrep -fl", "pgrep -lf", "pgrep -af", "pgrep -a", "ps ax", "env", "ps aux", "ps -ef", "ps -eo", "printenv"]
+action = "deny"
+message = "nunca imprimir linha de comando de processo nem variáveis de ambiente (use lsof -i :porta)"
+
+[[guard]]
+id = "site-sem-preview"
+law = "lei-site-local"
+tool = "Bash"
+field = "command"
+all = ["vite preview"]
+action = "deny"
+message = "site local sempre com npx vite --port 32100 --strictPort, nunca vite preview"
