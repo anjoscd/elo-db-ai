@@ -70,7 +70,7 @@ pub fn render(tool: Tool, project: bool) -> String {
     };
     let mut hooks = Map::new();
     for event in events {
-        let command = format!("elo hook {event} --live --formato {name}");
+        let command = format!("elo hook {event} --live --format {name}");
         let hook = match tool {
             Tool::Cursor => json!([{ "command": command }]),
             Tool::Copilot => {

@@ -12,6 +12,7 @@ pub enum Format {
     Cursor,
     Copilot,
     Windsurf,
+    #[value(name = "windsurf-legacy", alias = "windsurf-legado")]
     WindsurfLegado,
     Cline,
     Gemini,

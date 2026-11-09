@@ -105,6 +105,21 @@ fn plan_proposes_without_changing_anything() {
 }
 
 #[test]
+fn maintain_apply_english_flag_and_old_alias_work() {
+    for flag in ["--apply", "--aplicar"] {
+        let (dir, _store) = workspace();
+        let out = Command::new(env!("CARGO_BIN_EXE_elo"))
+            .args(["maintain", flag])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{flag}: {text}");
+        assert!(text.contains("APPLIED:"), "{flag}: {text}");
+    }
+}
+
+#[test]
 fn apply_supersedes_expires_cleans_and_backs_up_but_never_touches_laws() {
     let (_dir, mut store) = workspace();
     let now = now_seconds();

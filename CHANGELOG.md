@@ -9,12 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Hook adapters for Codex, Gemini, Cursor and Copilot, native event aliases, deferred prompt context and edit-driven map synchronization.
-- `elo setup <tool> [--projeto]` prints hook/MCP configuration for nine tools without writing configuration files.
+- `elo setup <tool> [--project]` prints hook/MCP configuration for nine tools without writing configuration files.
 - `elo export` generates scoped agent rules with preserved user text, safe filenames, obsolete-rule cleanup and dry-run previews.
 - Binary integration coverage for hook protocols, configuration snippets and rule exports.
 
 ### Changed
 
+- Renamed CLI flags to English: `--step`, `--keywords`, `--apply`, `--scope`, `--format`, `--project`, `--output`. The old Portuguese names remain hidden aliases. The `elo setup` tool stays a positional argument (`elo setup <TOOL>`).
+- Renamed `windsurf-legado` export format to `windsurf-legacy` with `windsurf-legado` as a hidden alias.
 - Enforced Claude/Codex denials exit with code 2 and explain the decision on stderr; shadow guards remain silent.
 
 ## [0.1.0]

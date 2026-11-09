@@ -1,4 +1,4 @@
-//! `elo maintain`: memory housekeeping, proposed first and applied only with `--aplicar`.
+//! `elo maintain`: memory housekeeping, proposed first and applied only with `--apply`.
 //!
 //! Consolidation, not deletion (SPEC §6.1, Zep/Graphiti "invalidate, don't discard"):
 //! duplicated items are superseded by their newest copy, overdue items are marked expired,
@@ -23,7 +23,7 @@ pub struct Plan {
     pub orphan_usage: usize,
     pub old_usage: usize,
     /// (old, new, similarity): similar decisions/notes where the newer may replace the
-    /// older. Suggestions only: never applied by `--aplicar`.
+    /// older. Suggestions only: never applied by `--apply`.
     pub similar: Vec<(String, String, f64)>,
 }
 
@@ -248,7 +248,7 @@ pub fn report(plan: &Plan, applied: Option<&Applied>) -> String {
         }
     }
     match applied {
-        None => out.push_str("nothing was changed; to apply: elo maintain --aplicar\n"),
+        None => out.push_str("nothing was changed; to apply: elo maintain --apply\n"),
         Some(a) => {
             out.push_str(&format!(
                 "APPLIED: {} superseded, {} expired, {} scoreboard rows deleted; backup: {}\n",

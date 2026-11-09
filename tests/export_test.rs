@@ -179,6 +179,27 @@ fn windsurf_current_and_legacy_are_explicit_and_separate() {
 }
 
 #[test]
+fn english_flags_and_windsurf_legacy_value_work() {
+    let dir = workspace();
+    ok(
+        dir.path(),
+        &[
+            "export",
+            "--format",
+            "windsurf-legacy",
+            "--output",
+            "legacy-out",
+            "--scope",
+            "global",
+        ],
+    );
+    assert!(dir
+        .path()
+        .join("legacy-out/.windsurf/rules/elo-always.md")
+        .is_file());
+}
+
+#[test]
 fn absolute_temporary_output_allows_symlink_ancestors_but_not_inner_links() {
     let dir = workspace();
     let temp = tempfile::tempdir().unwrap();
@@ -208,4 +229,25 @@ fn absolute_temporary_output_allows_symlink_ancestors_but_not_inner_links() {
         .status
         .success());
     }
+}
+
+#[test]
+fn old_portuguese_flags_still_work() {
+    let dir = workspace();
+    ok(
+        dir.path(),
+        &[
+            "export",
+            "--formato",
+            "windsurf-legado",
+            "--saida",
+            "old-out",
+            "--escopo",
+            "global",
+        ],
+    );
+    assert!(dir
+        .path()
+        .join("old-out/.windsurf/rules/elo-always.md")
+        .is_file());
 }

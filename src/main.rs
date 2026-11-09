@@ -27,12 +27,12 @@ struct Cli {
 #[allow(dead_code)]
 #[derive(Debug, Subcommand)]
 enum RecipeCmd {
-    /// Add a recipe: elo recipe add "title" --passo "..." --passo "..." --palavras a,b
+    /// Add a recipe: elo recipe add "title" --step "..." --step "..." --keywords a,b
     Add {
         title: String,
-        #[arg(long = "passo", required = true)]
+        #[arg(long = "step", alias = "passo", required = true)]
         steps: Vec<String>,
-        #[arg(long = "palavras", value_delimiter = ',')]
+        #[arg(long = "keywords", alias = "palavras", value_delimiter = ',')]
         keywords: Vec<String>,
         #[arg(long)]
         as_user: bool,
@@ -62,24 +62,34 @@ enum Command {
         /// Record under `.elo/shadow/` and emit context where supported; overrides --shadow.
         #[arg(long)]
         live: bool,
-        #[arg(long, value_enum, default_value = "claude")]
+        #[arg(
+            long = "format",
+            alias = "formato",
+            value_enum,
+            default_value = "claude"
+        )]
         formato: elo_ctx::adapt::Format,
     },
     /// Print configuration snippets without writing files.
     Setup {
         #[arg(value_enum)]
-        ferramenta: elo_ctx::setup::Tool,
-        #[arg(long)]
-        projeto: bool,
+        tool: elo_ctx::setup::Tool,
+        #[arg(long = "project", alias = "projeto")]
+        project: bool,
     },
     /// Export active laws to agent rule files.
     Export {
-        #[arg(long, value_enum, default_value = "agents")]
-        formato: elo_ctx::export::Format,
-        #[arg(long)]
-        saida: Option<PathBuf>,
-        #[arg(long)]
-        escopo: Option<String>,
+        #[arg(
+            long = "format",
+            alias = "formato",
+            value_enum,
+            default_value = "agents"
+        )]
+        format: elo_ctx::export::Format,
+        #[arg(long = "output", alias = "saida")]
+        output: Option<PathBuf>,
+        #[arg(long = "scope", alias = "escopo")]
+        scope: Option<String>,
         #[arg(long)]
         dry_run: bool,
     },
@@ -178,11 +188,11 @@ enum Command {
         #[command(subcommand)]
         cmd: RecipeCmd,
     },
-    /// Memory housekeeping: propose (default) or apply (--aplicar) consolidation.
+    /// Memory housekeeping: propose (default) or apply (--apply) consolidation.
     Maintain {
         /// Apply the plan (a full copy of the store is made first).
-        #[arg(long)]
-        aplicar: bool,
+        #[arg(long = "apply", alias = "aplicar")]
+        apply: bool,
     },
     /// Show the local scoreboard (SPEC §6.5).
     Stats {
@@ -365,24 +375,21 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             live,
             formato,
         } => adapted_hook(&event, shadow, live, formato),
-        Command::Setup {
-            ferramenta,
-            projeto,
-        } => {
-            print!("{}", elo_ctx::setup::render(ferramenta, projeto));
+        Command::Setup { tool, project } => {
+            print!("{}", elo_ctx::setup::render(tool, project));
             Ok(ExitCode::SUCCESS)
         }
         Command::Export {
-            formato,
-            saida,
-            escopo,
+            format,
+            output,
+            scope,
             dry_run,
         } => {
             let report = elo_ctx::export::run(
                 root,
-                saida.as_deref().unwrap_or(root),
-                formato,
-                escopo.as_deref(),
+                output.as_deref().unwrap_or(root),
+                format,
+                scope.as_deref(),
                 dry_run,
             )
             .map_err(AppError::Usage)?;
@@ -503,12 +510,12 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Maintain { aplicar } => {
+        Command::Maintain { apply } => {
             let mut store = elo_ctx::store::Store::open(root)?;
             let now = elo_ctx::store::now_seconds();
             let plan = elo_ctx::maintain::plan(&store, now)
                 .map_err(|e| AppError::Internal(e.to_string()))?;
-            let applied = if aplicar {
+            let applied = if apply {
                 Some(
                     elo_ctx::maintain::apply(&mut store, &plan, now)
                         .map_err(|e| AppError::Internal(e.to_string()))?,

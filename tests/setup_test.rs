@@ -17,7 +17,7 @@ fn setup_prints_valid_snippets_without_writing() {
             let mut cmd = Command::new(env!("CARGO_BIN_EXE_elo"));
             cmd.current_dir(dir.path()).args(["setup", tool]);
             if project {
-                cmd.arg("--projeto");
+                cmd.arg("--project");
             }
             let out = cmd.output().unwrap();
             assert!(out.status.success());
@@ -33,7 +33,7 @@ fn setup_prints_valid_snippets_without_writing() {
                 }
             }
             if matches!(tool, "claude" | "codex" | "gemini" | "cursor" | "copilot") {
-                assert!(text.contains(&format!("--formato {tool}")));
+                assert!(text.contains(&format!("--format {tool}")));
             }
             if tool == "gemini" {
                 assert!(text.contains("10000"));
@@ -57,4 +57,19 @@ fn setup_prints_valid_snippets_without_writing() {
             assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
         }
     }
+}
+
+#[test]
+fn old_projeto_alias_matches_project_flag() {
+    let run = |flag: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_elo"))
+            .current_dir(dir.path())
+            .args(["setup", "claude", flag])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{flag}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    assert_eq!(run("--project"), run("--projeto"));
 }

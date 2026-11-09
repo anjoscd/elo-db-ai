@@ -1,4 +1,4 @@
-# ELO
+# ELO-DB-AI
 
 Motor local de contexto e memória para agentes de código, escrito em Rust. Funciona em qualquer IDE e com qualquer modelo: servidor MCP e adaptadores de ganchos para Claude Code, Codex, Gemini CLI, Cursor e GitHub Copilot.
 
@@ -28,13 +28,17 @@ Agentes de código esquecem regras e decisões entre conversas. Carregar toda a 
 
 ## Instalação
 
-Compile a partir deste repositório com uma versão estável recente de Rust e Cargo:
+O ELO é um programa em Rust. Instale o Rust (que já traz o Cargo) pelo [rustup.rs](https://rustup.rs) e depois instale o ELO:
 
 ```sh
-cargo build --release
+# direto do GitHub
+cargo install --git https://github.com/anjoscd/elo-db-ai --locked
+
+# ou de uma cópia local
+cargo install --path . --locked
 ```
 
-Coloque o executável gerado, `target/release/elo`, em um diretório do seu `PATH` acessível ao Claude Code. Na pasta de trabalho que deseja gerenciar, execute:
+Isso coloca o `elo` em `~/.cargo/bin`, que o rustup já põe no seu `PATH`. Na pasta de trabalho que deseja gerenciar, execute:
 
 ```sh
 elo init
@@ -217,17 +221,17 @@ Use os IDs retornados com `elo task update <id> --status in_progress`, `elo task
 
 ```sh
 elo recipe add "Verificar uma alteração" \
-  --passo "Execute os testes relevantes." \
-  --passo "Revise o diff em busca de alterações não intencionais." \
-  --palavras testes,revisão
+  --step "Execute os testes relevantes." \
+  --step "Revise o diff em busca de alterações não intencionais." \
+  --keywords testes,revisão
 elo recipe list
 elo maintain
-elo maintain --aplicar
+elo maintain --apply
 ```
 
-Receitas exigem pelo menos dois passos e são armazenadas como notas globais. Os nomes das opções acima são os nomes reais da CLI nos dois idiomas.
+Receitas exigem pelo menos dois passos e são armazenadas como notas globais. As opções acima usam os nomes em inglês; os nomes anteriores em português continuam funcionando como aliases.
 
-`elo maintain` mostra um plano. `--aplicar` primeiro faz backup do banco, depois tenta substituições válidas de duplicados, marca itens expirados e remove registros automáticos de uso antigos ou órfãos. Decisões/notas semelhantes são sugestões para revisão manual; leis duplicadas são informadas sem consolidação automática.
+`elo maintain` mostra um plano. `--apply` primeiro faz backup do banco, depois tenta substituições válidas de duplicados, marca itens expirados e remove registros automáticos de uso antigos ou órfãos. Decisões/notas semelhantes são sugestões para revisão manual; leis duplicadas são informadas sem consolidação automática.
 
 ## Avaliação
 
@@ -291,20 +295,20 @@ Para alterações no seletor, compare a saída do benchmark e explique o efeito.
 
 ```sh
 elo setup codex                 # imprime caminhos e trechos de configuração
-elo setup cursor --projeto     # configuração do projeto; não grava arquivos
-elo hook BeforeAgent --live --formato gemini
-elo export --formato todos --dry-run
-elo export --formato cursor --saida . --escopo project:api
+elo setup cursor --project     # configuração do projeto; não grava arquivos
+elo hook BeforeAgent --live --format gemini
+elo export --format todos --dry-run
+elo export --format cursor --output . --scope project:api
 ```
 
-`elo hook --formato claude|codex|gemini|cursor|copilot` aceita os eventos nativos e os nomes atuais em kebab-case. Eventos desconhecidos terminam sem saída. O Gemini recebe somente JSON; BeforeTool não injeta contexto. beforeSubmitPrompt do Cursor responde `{"continue":true}`; userPromptSubmitted do Copilot fica sem saída. Ambos registram o pedido e adiam seu contexto para postToolUse, mostrando o bloco de trabalho uma vez por projeto na sessão. SessionStart pode mostrá-lo antes. apply_patch do Codex e write_file/replace do Gemini atualizam um mapa existente; o Cursor usa afterFileEdit.
+`elo hook --format claude|codex|gemini|cursor|copilot` aceita os eventos nativos e os nomes atuais em kebab-case. Eventos desconhecidos terminam sem saída. O Gemini recebe somente JSON; BeforeTool não injeta contexto. beforeSubmitPrompt do Cursor responde `{"continue":true}`; userPromptSubmitted do Copilot fica sem saída. Ambos registram o pedido e adiam seu contexto para postToolUse, mostrando o bloco de trabalho uma vez por projeto na sessão. SessionStart pode mostrá-lo antes. apply_patch do Codex e write_file/replace do Gemini atualizam um mapa existente; o Cursor usa afterFileEdit.
 
 As travas continuam em modo sombra, salvo configuração com `enforce = true`. Negações usam o protocolo da ferramenta; Claude e Codex terminam com código 0 e JSON `hookSpecificOutput.permissionDecision: "deny"`. Ambos preservam `ask`; os demais formatos não o convertem em negação.
 
-`elo setup` imprime os ganchos e a configuração MCP, com o caminho de destino no topo de cada trecho. Mescle os trechos com sua configuração existente. Ganchos do Copilot usam `~/.copilot/hooks/elo.json`, ou `.github/hooks/elo.json` com `--projeto`; no JetBrains, cole o JSON na tela de configuração MCP. Os trechos MCP pressupõem uma versão do ELO que forneça `elo mcp`; setup não implementa nem inicia o servidor.
+`elo setup` imprime os ganchos e a configuração MCP, com o caminho de destino no topo de cada trecho. Mescle os trechos com sua configuração existente. Ganchos do Copilot usam `~/.copilot/hooks/elo.json`, ou `.github/hooks/elo.json` com `--project`; no JetBrains, cole o JSON na tela de configuração MCP. Os trechos MCP pressupõem uma versão do ELO que forneça `elo mcp`; setup não implementa nem inicia o servidor.
 
-`elo export --formato agents|cursor|copilot|windsurf|windsurf-legado|cline|gemini|todos` exporta leis ativas e não expiradas. O padrão é `agents`, a pasta padrão é o diretório atual e `--escopo` compara o escopo armazenado exatamente. Leis always/de palavra-chave entram em AGENTS.md (e GEMINI.md no formato Gemini); as condições de palavras-chave permanecem como texto. Leis por caminho usam regras nativas, incluindo `pasta/migrations*` e `pasta/migrations*/**` para prefixos ELO. Os formatos de regras nativas também geram AGENTS.md para palavras-chave; configure sua ferramenta para carregá-lo quando necessário.
+`elo export --format agents|cursor|copilot|windsurf|windsurf-legacy|cline|gemini|todos` exporta leis ativas e não expiradas. O padrão é `agents`, a pasta padrão é o diretório atual e `--scope` compara o escopo armazenado exatamente. Leis always/de palavra-chave entram em AGENTS.md (e GEMINI.md no formato Gemini); as condições de palavras-chave permanecem como texto. Leis por caminho usam regras nativas, incluindo `pasta/migrations*` e `pasta/migrations*/**` para prefixos ELO. Os formatos de regras nativas também geram AGENTS.md para palavras-chave; configure sua ferramenta para carregá-lo quando necessário.
 
 Arquivos compartilhados preservam tudo fora de `<!-- elo:begin -->` / `<!-- elo:end -->`. Marcadores incompletos ou duplicados e links simbólicos interrompem a exportação sem alterar arquivos. Arquivos `elo-*` nas pastas de regras selecionadas pertencem ao ELO e podem ser regenerados ou removidos quando obsoletos; use outros nomes para regras próprias. O `elo.mdc` do Cursor também preserva texto fora dos marcadores. Uma exportação com escopo preserva arquivos nativos de leis ativas de outros escopos, mas substitui o bloco compartilhado pelo escopo selecionado. Repetir a exportação não muda o resultado; `--dry-run` lista gravações e remoções sem executá-las.
 
-Windsurf / Devin Desktop: `elo setup windsurf` mostra o MCP global atual em `~/.config/devin/mcp_config.json` e o legado em `~/.codeium/windsurf/mcp_config.json`, inclusive com `--projeto`. `elo export --formato windsurf` grava em `.devin/rules`; use `--formato windsurf-legado` para `.windsurf/rules`. `todos` seleciona apenas o formato atual. Se `.clinerules` já for arquivo, recebe um bloco com marcadores; caso contrário, a exportação usa a pasta `.clinerules/`. A verificação de links limita-se à pasta de saída e seus descendentes, sem verificar ancestrais do sistema.
+Windsurf / Devin Desktop: `elo setup windsurf` mostra o MCP global atual em `~/.config/devin/mcp_config.json` e o legado em `~/.codeium/windsurf/mcp_config.json`, inclusive com `--project`. `elo export --format windsurf` grava em `.devin/rules`; use `--format windsurf-legacy` para `.windsurf/rules`. `todos` seleciona apenas o formato atual. Se `.clinerules` já for arquivo, recebe um bloco com marcadores; caso contrário, a exportação usa a pasta `.clinerules/`. A verificação de links limita-se à pasta de saída e seus descendentes, sem verificar ancestrais do sistema.

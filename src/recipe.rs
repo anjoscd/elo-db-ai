@@ -60,7 +60,7 @@ pub fn add_recipe(
         .collect();
     if steps.len() < 2 {
         return Err(WriteError::Refused(
-            "a recipe needs at least 2 steps (--passo ... --passo ...)".into(),
+            "a recipe needs at least 2 steps (--step ... --step ...)".into(),
         ));
     }
     if title.trim().is_empty() {

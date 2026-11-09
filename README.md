@@ -1,4 +1,4 @@
-# ELO
+# ELO-DB-AI
 
 A local context and memory engine for coding agents, written in Rust. Works with any IDE and any model: an MCP server plus hook adapters for Claude Code, Codex, Gemini CLI, Cursor and GitHub Copilot.
 
@@ -28,13 +28,17 @@ Coding agents lose rules and decisions between conversations. Loading every memo
 
 ## Installation
 
-Build from this checkout with a recent stable Rust toolchain and Cargo:
+ELO is a Rust program. Install Rust (which includes Cargo) from [rustup.rs](https://rustup.rs), then install ELO:
 
 ```sh
-cargo build --release
+# straight from GitHub
+cargo install --git https://github.com/anjoscd/elo-db-ai --locked
+
+# or from a local checkout
+cargo install --path . --locked
 ```
 
-Put the resulting `target/release/elo` executable in a directory on your `PATH` that Claude Code can access. In the workspace you want to manage, run:
+This puts `elo` in `~/.cargo/bin`, which rustup adds to your `PATH`. In the workspace you want to manage, run:
 
 ```sh
 elo init
@@ -217,17 +221,17 @@ Use returned task IDs with `elo task update <id> --status in_progress`, `elo tas
 
 ```sh
 elo recipe add "Verify a change" \
-  --passo "Run the relevant tests." \
-  --passo "Review the diff for unintended changes." \
-  --palavras tests,review
+  --step "Run the relevant tests." \
+  --step "Review the diff for unintended changes." \
+  --keywords tests,review
 elo recipe list
 elo maintain
-elo maintain --aplicar
+elo maintain --apply
 ```
 
-Recipes require at least two steps and are stored as global notes. The option names above are the actual CLI flags in both languages.
+Recipes require at least two steps and are stored as global notes. The commands use the English option names; the old Portuguese names still work as hidden aliases.
 
-`elo maintain` shows a plan. `--aplicar` first backs up the store, then attempts valid duplicate supersessions, marks expired items and removes old or orphaned automatic usage rows. Similar decisions/notes are suggestions for manual review; duplicate laws are reported without automatic consolidation.
+`elo maintain` shows a plan. `--apply` first backs up the store, then attempts valid duplicate supersessions, marks expired items and removes old or orphaned automatic usage rows. Similar decisions/notes are suggestions for manual review; duplicate laws are reported without automatic consolidation.
 
 ## Evaluation
 
@@ -291,20 +295,20 @@ For selector changes, compare benchmark output and explain the effect. Contribut
 
 ```sh
 elo setup codex                 # print file paths and configuration snippets
-elo setup cursor --projeto     # project configuration; does not write files
-elo hook BeforeAgent --live --formato gemini
-elo export --formato todos --dry-run
-elo export --formato cursor --saida . --escopo project:api
+elo setup cursor --project     # project configuration; does not write files
+elo hook BeforeAgent --live --format gemini
+elo export --format todos --dry-run
+elo export --format cursor --output . --scope project:api
 ```
 
-`elo hook --formato claude|codex|gemini|cursor|copilot` accepts each tool's native event names and the existing kebab-case names. Unknown events are silent. Gemini emits JSON only; its BeforeTool event cannot inject context. Cursor's beforeSubmitPrompt returns `{"continue":true}`; Copilot's userPromptSubmitted is silent. Both record the prompt and defer its context to postToolUse, with the work block shown once per project in the session. SessionStart can show that block earlier. Codex apply_patch and Gemini write_file/replace keep an existing code map current; Cursor uses afterFileEdit.
+`elo hook --format claude|codex|gemini|cursor|copilot` accepts each tool's native event names and the existing kebab-case names. Unknown events are silent. Gemini emits JSON only; its BeforeTool event cannot inject context. Cursor's beforeSubmitPrompt returns `{"continue":true}`; Copilot's userPromptSubmitted is silent. Both record the prompt and defer its context to postToolUse, with the work block shown once per project in the session. SessionStart can show that block earlier. Codex apply_patch and Gemini write_file/replace keep an existing code map current; Cursor uses afterFileEdit.
 
 Guards remain in shadow mode unless configured with `enforce = true`. Enforced denials use each tool's protocol; Claude and Codex return exit code 0 with JSON `hookSpecificOutput.permissionDecision: "deny"`. Both preserve `ask`; other formats do not convert it into a denial.
 
-`elo setup` prints hooks and MCP configuration, headed by the destination file path. Merge the snippets into existing configuration. Copilot hooks use `~/.copilot/hooks/elo.json`, or `.github/hooks/elo.json` with `--projeto`; JetBrains configuration is pasted in its MCP settings UI. The MCP snippets expect an ELO build providing `elo mcp`; setup does not implement or start the server.
+`elo setup` prints hooks and MCP configuration, headed by the destination file path. Merge the snippets into existing configuration. Copilot hooks use `~/.copilot/hooks/elo.json`, or `.github/hooks/elo.json` with `--project`; JetBrains configuration is pasted in its MCP settings UI. The MCP snippets expect an ELO build providing `elo mcp`; setup does not implement or start the server.
 
-`elo export --formato agents|cursor|copilot|windsurf|windsurf-legado|cline|gemini|todos` exports active, unexpired laws. The default is `agents`, the output folder defaults to the current directory, and `--escopo` matches the exact stored scope. Always/keyword laws go in AGENTS.md (and GEMINI.md for Gemini); keyword conditions remain readable text. Path laws use native glob rules, including both `folder/migrations*` and `folder/migrations*/**` for ELO prefix paths. Native rule formats also emit AGENTS.md for keyword laws; configure your tool to load it when necessary.
+`elo export --format agents|cursor|copilot|windsurf|windsurf-legacy|cline|gemini|todos` exports active, unexpired laws. The default is `agents`, the output folder defaults to the current directory, and `--scope` matches the exact stored scope. Always/keyword laws go in AGENTS.md (and GEMINI.md for Gemini); keyword conditions remain readable text. Path laws use native glob rules, including both `folder/migrations*` and `folder/migrations*/**` for ELO prefix paths. Native rule formats also emit AGENTS.md for keyword laws; configure your tool to load it when necessary.
 
 Shared files preserve all text outside `<!-- elo:begin -->` / `<!-- elo:end -->`. Invalid or duplicate markers and symlinks stop the export without changing files. Files named `elo-*` in the selected rule directories are owned by ELO and may be regenerated or removed when obsolete; keep custom rules under other names. Cursor's `elo.mdc` also preserves text outside ELO markers. A scoped export preserves native files belonging to active laws in other scopes, but replaces the shared ELO block with the selected scope. Repeated exports are idempotent; `--dry-run` lists writes and removals without performing them.
 
-Windsurf / Devin Desktop: `elo setup windsurf` prints both the current global MCP path `~/.config/devin/mcp_config.json` and the legacy path `~/.codeium/windsurf/mcp_config.json`, including with `--projeto`. `elo export --formato windsurf` writes `.devin/rules`; use `--formato windsurf-legado` for `.windsurf/rules`. `todos` selects the current layout only. Existing `.clinerules` files receive a marked ELO block; otherwise export uses the supported `.clinerules/` directory. Symlink checks apply to the output folder and its descendants, not its system ancestors.
+Windsurf / Devin Desktop: `elo setup windsurf` prints both the current global MCP path `~/.config/devin/mcp_config.json` and the legacy path `~/.codeium/windsurf/mcp_config.json`, including with `--project`. `elo export --format windsurf` writes `.devin/rules`; use `--format windsurf-legacy` for `.windsurf/rules`. `todos` selects the current layout only. Existing `.clinerules` files receive a marked ELO block; otherwise export uses the supported `.clinerules/` directory. Symlink checks apply to the output folder and its descendants, not its system ancestors.

@@ -119,3 +119,29 @@ fn recipe_is_delivered_by_its_keyword_and_titles_are_handled() {
     );
     assert!(ok && out.contains("recipe saved: receita-"), "{out}");
 }
+
+#[test]
+fn recipe_accepts_english_step_and_keywords_flags() {
+    let dir = TempDir::new().unwrap();
+    elo(dir.path(), &["init"]);
+    let (ok, out) = elo(
+        dir.path(),
+        &[
+            "recipe",
+            "add",
+            "English flags recipe",
+            "--step",
+            "first step",
+            "--step",
+            "second step",
+            "--keywords",
+            "english,flags",
+            "--as-user",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("recipe saved: receita-english-flags-recipe"),
+        "{out}"
+    );
+}
