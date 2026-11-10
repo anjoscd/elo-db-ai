@@ -23,6 +23,7 @@ pub mod recall;
 pub mod recipe;
 pub mod stats;
 pub mod store;
+pub mod update;
 pub mod work;
 pub mod write;
 

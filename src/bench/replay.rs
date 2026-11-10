@@ -1,5 +1,5 @@
 //! Local replay with no persistence and aggregate-only output.
-use std::{collections::BTreeMap, io::BufRead, path::Path};
+use std::{collections::BTreeMap, io::BufRead, io::Write as _, path::Path};
 
 use serde::Deserialize;
 
@@ -68,6 +68,10 @@ pub fn aggregate(
         records.push(record);
     }
     records.sort_by(|a, b| (&a.session_id, a.event_seq).cmp(&(&b.session_id, b.event_seq)));
+    // ELO_REPLAY_DUMP=<file>: write each prompt and its rendered context (never the store).
+    let mut dump = std::env::var_os("ELO_REPLAY_DUMP")
+        .and_then(|path| std::fs::File::create(path).ok())
+        .map(std::io::BufWriter::new);
     for record in records {
         let cwd = hook::relative(
             &fx.code_root,
@@ -97,6 +101,14 @@ pub fn aggregate(
         missing += usize::from(ev.prompt.is_none());
         let selection = E1.select(fx, &ev, state);
         state.record(&selection);
+        if let Some(out) = dump.as_mut() {
+            // Evaluation only (blind tests): what the selector would deliver for this prompt.
+            let line = serde_json::json!({
+                "session_id": ev.session_id, "event_seq": ev.event_seq, "at": ev.now,
+                "prompt": ev.prompt, "rendered": super::selector::render(fx, &ev, &selection),
+            });
+            let _ = writeln!(out, "{line}");
+        }
         full_items += selection.full_ids.len();
         empty += usize::from(selection.full_ids.is_empty() && selection.pointer_ids.is_empty());
         empty_output += usize::from(selection.used_bytes == 0);

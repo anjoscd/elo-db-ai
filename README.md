@@ -4,6 +4,30 @@ A local context and memory engine for coding agents, written in Rust. Works with
 
 [Português do Brasil](README.pt-BR.md) · [Specification](docs/SPEC.md) · [Evaluation](docs/EVALUATION.md) · [Research](docs/RESEARCH.md) · [Changelog](CHANGELOG.md)
 
+## Why ELO
+
+**Why we use it.** An agent only follows a rule it can see at the moment it acts. Pasting every rule into every prompt wastes context and buries the one that matters; leaving rules out means the agent repeats old mistakes. ELO sends the few rules and decisions that apply to *this* request, *this* project and *this* file, and lists the rest as short pointers. In a blind test on real prompts it beat full rule injection in 74% of the decided cases while sending about a quarter of the bytes (≈1.4 KB vs ≈5.4 KB per prompt).
+
+**Technologies.**
+
+| Part | Technology |
+|---|---|
+| Engine | Rust (single static binary, no runtime) |
+| Memory | SQLite with FTS5 full-text search |
+| Code map | tree-sitter (JavaScript/TypeScript callers, callees, imports) |
+| Integration | MCP server (stdio) + hook adapters for Claude Code, Codex, Gemini CLI, Cursor, GitHub Copilot |
+| Optional | static local embeddings (model2vec format), off by default |
+
+**Why it makes coding safer.**
+
+- **Nothing leaves your machine.** No network calls, no telemetry; memory, indexes and logs stay in `.elo/`. The only exception is the manual `elo update` command (from 0.2.0), which runs only when you type it.
+- **The right rule before the risky step.** Rules anchored to files (migrations, deploy scripts, config) are delivered right before the agent reads or edits those files.
+- **Guards on dangerous commands.** Configurable guards can record, ask for confirmation or block a tool call (e.g. force-push, publishing, deleting).
+- **Only you write the laws.** Laws require `--as-user`; the agent cannot create or promote them on its own.
+- **No stale or mixed context.** Superseded decisions stop being delivered, and another project's items arrive only as pointers.
+- **Secrets stay out of logs.** Prompts are scrubbed of keys and tokens before anything is recorded.
+- **Auditable.** `elo explain` and `elo stats` show why each item was sent and whether it was used.
+
 ## The problem
 
 Coding agents lose rules and decisions between conversations. Loading every memory into every prompt consumes context and can bring back outdated or unrelated information. A useful memory system needs to deliver the right rule when the agent is about to need it, while keeping the rest available for lookup.
@@ -46,6 +70,23 @@ elo doctor
 ```
 
 `elo init` creates `.elo/` and an `elo.toml` containing defaults and discovered projects, preserving an existing configuration. Run workspace commands from that workspace's root. Hooks locate the workspace from the event's `cwd`.
+
+## Updating
+
+ELO never updates automatically, runs updates from hooks, or triggers updates through the MCP server. To update the `elo` binary manually:
+
+```sh
+# check the current and latest versions without downloading
+elo update --check
+
+# install the latest release for your platform
+elo update
+
+# install a specific release
+elo update --version 0.2.0
+```
+
+The command uses the system `curl` (with `--fail --location --proto =https --tlsv1.2`) to download the matching release archive and its `SHA256SUMS`, verifies the SHA-256 digest, extracts the `elo` binary, and atomically replaces the current binary while keeping the previous one as `elo.old`.
 
 ## Use in any IDE (MCP)
 
@@ -275,9 +316,14 @@ cargo clippy --all-targets -- -D warnings
 
 For selector changes, compare benchmark output and explain the effect. Contributions must be original or compatible with the project's license.
 
-## License
+## License and forks
 
-[Apache License 2.0](LICENSE).
+[Functional Source License 1.1, ALv2 Future License (FSL-1.1-ALv2)](LICENSE). In short:
+
+- **Free to use:** individuals and companies may use, modify and **fork** ELO, including at work and inside their own products and projects.
+- **Not allowed without a license from the author:** offering ELO itself, or a product or service that **competes** with it (for example selling it, or hosting it as a paid service). For a commercial license, contact the author through [GitHub issues](https://github.com/anjoscd/elo-db-ai/issues).
+- **Becomes Apache 2.0:** each version turns into Apache License 2.0 two years after its release.
+- **Credit is required:** forks and changed copies must keep the [LICENSE](LICENSE) and [NOTICE](NOTICE) files, credit **ELO-DB-AI by anjoscd** (https://github.com/anjoscd/elo-db-ai) and state which files were changed.
 
 ## Other coding tools
 

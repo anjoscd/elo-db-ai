@@ -18,6 +18,13 @@ const W_RECENCY: f64 = 0.1;
 const W_IMPORTANCE: f64 = 0.2;
 const W_MATCH: f64 = 0.3;
 
+/// Cap on note/decision pointers: past five, index lines crowd out the answer.
+const MAX_NOTE_POINTERS: usize = 5;
+/// A note/decision updated at most this long ago (seconds) may come in full on one common word.
+const RECENT_NOTE_SECS: i64 = 48 * 3600;
+/// At most this many recent single-word notes per prompt get that exception.
+const MAX_RECENT_NOTES: usize = 2;
+
 /// Prompt text with code removed (SPEC §3.1: words in code never trigger):
 /// indented lines, fenced blocks (a run of 3+ backticks or tildes, anywhere, up to the
 /// next run of the same length, across lines) and inline spans (1–2 backticks, same line).
@@ -80,6 +87,38 @@ fn prose(prompt: &str) -> String {
         }
     }
     normalize(&out)
+}
+
+/// Remove image metadata before matching prose or project aliases.
+fn without_images(prompt: &str) -> String {
+    let mut out = String::new();
+    let mut rest = prompt;
+    while let Some(start) = rest.find("[Image") {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        if let Some(end) = rest.find(']') {
+            let marker = &rest[..=end];
+            let numbered = marker
+                .strip_prefix("[Image #")
+                .and_then(|s| s.strip_suffix(']'))
+                .is_some_and(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()));
+            if marker.starts_with("[Image: source: ") || numbered {
+                out.push(' ');
+                rest = &rest[end + 1..];
+                continue;
+            }
+        }
+        out.push('[');
+        rest = &rest[1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn word_count(text: &str) -> usize {
+    text.split(|c: char| !c.is_alphabetic())
+        .filter(|word| word.chars().count() >= 3)
+        .count()
 }
 
 fn has_word(text: &str, word: &str) -> bool {
@@ -336,13 +375,107 @@ fn limit_notes(
     *selection = combined(&kept);
 }
 
+/// Keeps at most `MAX_NOTE_POINTERS` note/decision pointers: the highest scored ones
+/// (ties: most recent `updated_at`, then id). Rule and law pointers keep their order.
+fn limit_note_pointers(
+    fx: &Fixture,
+    ev: &Event,
+    text: &str,
+    scored: &[(f64, &Item)],
+    selection: &mut Selection,
+) {
+    let items: BTreeMap<&str, &Item> = fx.items.iter().map(|i| (i.id.as_str(), i)).collect();
+    let is_note_id = |id: &str| items.get(id).is_some_and(|i| is_note(i));
+    if selection
+        .pointer_ids
+        .iter()
+        .filter(|id| is_note_id(id.as_str()))
+        .count()
+        <= MAX_NOTE_POINTERS
+    {
+        return;
+    }
+    let score_of: BTreeMap<&str, f64> = scored.iter().map(|(s, i)| (i.id.as_str(), *s)).collect();
+    let mut note_pointers: Vec<&String> = selection
+        .pointer_ids
+        .iter()
+        .filter(|id| is_note_id(id.as_str()))
+        .collect();
+    note_pointers.sort_by(|a, b| {
+        let sa = score_of.get(a.as_str()).copied().unwrap_or(f64::MIN);
+        let sb = score_of.get(b.as_str()).copied().unwrap_or(f64::MIN);
+        let ua = DateTime::parse_from_rfc3339(&items[a.as_str()].updated_at).ok();
+        let ub = DateTime::parse_from_rfc3339(&items[b.as_str()].updated_at).ok();
+        sb.total_cmp(&sa)
+            .then_with(|| ub.cmp(&ua))
+            .then_with(|| a.cmp(b))
+    });
+    let keep: BTreeSet<String> = note_pointers
+        .into_iter()
+        .take(MAX_NOTE_POINTERS)
+        .cloned()
+        .collect();
+    let cut: Vec<String> = selection
+        .pointer_ids
+        .iter()
+        .filter(|id| is_note_id(id.as_str()) && !keep.contains(id.as_str()))
+        .cloned()
+        .collect();
+    selection
+        .pointer_ids
+        .retain(|id| !is_note_id(id.as_str()) || keep.contains(id.as_str()));
+    // Cut pointers join the omission notice, so `elo recall` still finds them. The total
+    // is recounted from every matched note (an earlier notice may have been dropped for
+    // size), and the notice is kept only if the whole output still fits the budget.
+    let shown = |id: &str| {
+        selection.full_ids.iter().any(|f| f == id) || selection.pointer_ids.iter().any(|p| p == id)
+    };
+    let omitted = scored
+        .iter()
+        .filter(|(_, i)| is_note(i) && !shown(i.id.as_str()))
+        .count();
+    let keyword = selection
+        .omitted_notes
+        .first()
+        .map(|(_, k)| k.clone())
+        .or_else(|| {
+            cut.iter()
+                .flat_map(|id| &items[id.as_str()].triggers.keywords)
+                .map(|k| normalize(k))
+                .find(|k| has_word(text, k))
+        })
+        .unwrap_or_else(|| "notas".into());
+    selection.omitted_notes = if omitted > 0 {
+        vec![(omitted, keyword)]
+    } else {
+        vec![]
+    };
+    let budget = usize::try_from(fx.config.workspace.budget_bytes).unwrap_or(usize::MAX);
+    if render(fx, ev, selection).len() > budget {
+        selection.omitted_notes.clear();
+    }
+}
+
 impl Selector for E1 {
     fn name(&self) -> &str {
         "E1"
     }
 
     fn select(&self, fx: &Fixture, ev: &Event, state: &mut SessionState) -> Selection {
-        let text = prose(ev.prompt.as_deref().unwrap_or(""));
+        let real_prompt = ev.allowed_scopes.is_empty() && ev.event_type == "user-prompt-submit";
+        let prompt = ev.prompt.as_deref().unwrap_or("");
+        let text = prose(&if real_prompt {
+            without_images(prompt)
+        } else {
+            prompt.into()
+        });
+        let words = word_count(&text);
+        let matching_text = if real_prompt && ev.prompt.is_some() && words > 0 && words < 5 {
+            format!("{text}\n{}", state.recent_prompts.join("\n"))
+        } else {
+            text.clone()
+        };
+        let mut matched = false;
         let touched: Vec<String> = state
             .touched
             .iter()
@@ -365,21 +498,31 @@ impl Selector for E1 {
             let d = *df.get(&normalize(k)).unwrap_or(&0) as f64;
             ((n + 1.0) / (d + 1.0)).ln() / max_idf
         };
+        // A single matched word is rare when it has a digit ("150.000") or 8+ characters.
         let now = DateTime::parse_from_rfc3339(&ev.now).ok();
 
         let mut indexed = BTreeSet::new();
+        // Recent single-word notes that may skip the index (at most `MAX_RECENT_NOTES`).
+        let mut recent_notes: Vec<&Item> = Vec::new();
         let mut laws: Vec<&Item> = Vec::new();
         let mut scored: Vec<(f64, &Item)> = Vec::new();
-        for item in fx
-            .items
-            .iter()
-            .filter(|i| eligible(&scope, i) && is_current(i, &ev.now))
-        {
+        // Each cross-project pointer candidate stores the item and how many of its keywords matched.
+        let mut cross_project_pointers: Vec<(&Item, usize)> = Vec::new();
+        for item in fx.items.iter().filter(|i| is_current(i, &ev.now)) {
             let kw: Vec<&String> = item
                 .triggers
                 .keywords
                 .iter()
-                .filter(|k| has_word(&text, k))
+                .filter(|k| {
+                    has_word(
+                        if item.kind == Kind::Law {
+                            &text
+                        } else {
+                            &matching_text
+                        },
+                        k,
+                    )
+                })
                 .collect();
             let path_hit = item
                 .triggers
@@ -388,7 +531,25 @@ impl Selector for E1 {
                 .any(|p| touched.iter().any(|t| path_matches(p, t)));
             let always = item.triggers.always
                 && !crate::stats::demoted(item, fx.config.workspace.demote_bad_min);
+            let project_scope_allowed = eligible(&scope, item);
+            let project_keyword = item.scope.starts_with("project:")
+                && !kw.is_empty()
+                && (ev.allowed_scopes.is_empty() || ev.allowed_scopes.contains(&item.scope));
+            if !project_scope_allowed && !project_keyword {
+                continue;
+            }
+            matched |= !kw.is_empty() || path_hit;
             if kw.is_empty() && !path_hit && !always {
+                continue;
+            }
+            // project:X items triggered by keyword while the item is NOT eligible by scope are
+            // shown as short pointers, never in full text. path_hit keeps them full (the agent is
+            // touching a file in that project). In benchmark mode (allowed_scopes non-empty) the
+            // legacy behaviour is preserved so benchmarks keep measuring the same policy.
+            let is_project_scope = item.scope.starts_with("project:");
+            let real_mode = ev.allowed_scopes.is_empty();
+            if is_project_scope && !project_scope_allowed && !path_hit && real_mode {
+                cross_project_pointers.push((item, kw.len()));
                 continue;
             }
             if item.kind == Kind::Law {
@@ -404,8 +565,26 @@ impl Selector for E1 {
                     .collect::<BTreeSet<_>>()
                     .len()
                     < 2
+                && !(real_prompt
+                    && kw
+                        .iter()
+                        .any(|k| k.chars().any(|c| c.is_numeric()) || k.chars().count() >= 8))
             {
-                indexed.insert(item.id.clone());
+                // Real prompts: a note/decision updated in the last 48 h that matched the
+                // current text (not only the history) may still come in full (top 2 only).
+                let recent = real_prompt
+                    && kw.iter().any(|k| has_word(&text, k))
+                    && match (now, DateTime::parse_from_rfc3339(&item.updated_at)) {
+                        (Some(now), Ok(upd)) => {
+                            (0..RECENT_NOTE_SECS).contains(&(now - upd).num_seconds())
+                        }
+                        _ => false,
+                    };
+                if recent {
+                    recent_notes.push(item);
+                } else {
+                    indexed.insert(item.id.clone());
+                }
             }
             if kw.is_empty()
                 && !path_hit
@@ -437,6 +616,16 @@ impl Selector for E1 {
             } else {
                 kw.iter().map(|k| idf(k)).fold(0.0, f64::max)
             };
+            let strength = if real_prompt
+                && !kw.is_empty()
+                && !kw.iter().any(|k| has_word(&text, k))
+                && !path_hit
+                && !always
+            {
+                strength * 0.5
+            } else {
+                strength
+            };
             let score = W_PROXIMITY * proximity
                 + W_RECENCY * recency
                 + W_IMPORTANCE * item.importance.clamp(0.0, 1.0)
@@ -444,6 +633,17 @@ impl Selector for E1 {
             if score >= fx.config.workspace.min_score {
                 scored.push((score, item));
             }
+        }
+
+        // Only the most recent ones keep the exception; the rest go back to the index.
+        recent_notes.sort_by(|a, b| {
+            DateTime::parse_from_rfc3339(&b.updated_at)
+                .ok()
+                .cmp(&DateTime::parse_from_rfc3339(&a.updated_at).ok())
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        for item in recent_notes.iter().skip(MAX_RECENT_NOTES) {
+            indexed.insert(item.id.clone());
         }
 
         let budget = usize::try_from(fx.config.workspace.budget_bytes).unwrap_or(usize::MAX);
@@ -565,6 +765,90 @@ impl Selector for E1 {
         }
         selection.pointer_ids.extend(pending_pointers);
         limit_notes(fx, ev, &text, &mut selection, &eligible);
+        // Real mode only: too many note/decision pointers is noise; keep the best five.
+        // Benchmark mode (allowed_scopes filled) keeps measuring the legacy policy.
+        if ev.allowed_scopes.is_empty() {
+            limit_note_pointers(fx, ev, &text, &scored, &mut selection);
+        }
+        // Add cross-project keyword pointers (max 3) that fit inside the budget.
+        // Candidates are sorted by relevance (more keyword matches first, then id), duplicates
+        // against existing pointers/full items are skipped, and the budget is checked for each
+        // candidate in order; if one does not fit the next candidate is tried instead of stopping.
+        let mut cross_pointer_entries = cross_project_pointers;
+        cross_pointer_entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.id.cmp(&b.0.id)));
+        let mut inserted = 0;
+        for (item, _) in cross_pointer_entries {
+            if inserted >= 3 {
+                break;
+            }
+            let id = &item.id;
+            if selection.pointer_ids.contains(id) || selection.full_ids.contains(id) {
+                continue;
+            }
+            let mut next = selection.pointer_ids.clone();
+            next.push(id.clone());
+            if fits(&selection.full_ids, &next) {
+                selection.pointer_ids.push(id.clone());
+                inserted += 1;
+            }
+        }
+        if real_prompt && ev.prompt.is_some() && words == 0 && !matched {
+            if let Some(primary) = &scope.primary {
+                let project = format!("project:{primary}");
+                let mut candidates: Vec<_> = fx
+                    .items
+                    .iter()
+                    .filter(|item| {
+                        matches!(item.kind, Kind::Rule | Kind::Law)
+                            && item.scope == project
+                            && is_current(item, &ev.now)
+                            && !state.served.contains(&item.id)
+                    })
+                    .collect();
+                candidates.sort_by(|a, b| {
+                    b.importance
+                        .total_cmp(&a.importance)
+                        .then_with(|| {
+                            DateTime::parse_from_rfc3339(&b.updated_at)
+                                .ok()
+                                .cmp(&DateTime::parse_from_rfc3339(&a.updated_at).ok())
+                        })
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+                // Up to 3 rules actually added (an item already in full does not use a slot).
+                let mut added = 0;
+                for item in candidates {
+                    if added >= 3 {
+                        break;
+                    }
+                    if selection.full_ids.contains(&item.id) {
+                        continue;
+                    }
+                    let mut next = selection.clone();
+                    next.pointer_ids.retain(|id| id != &item.id);
+                    next.full_ids.push(item.id.clone());
+                    if render(fx, ev, &next).len() <= budget {
+                        selection = next;
+                        added += 1;
+                    } else if !selection.pointer_ids.contains(&item.id) {
+                        let mut next = selection.clone();
+                        next.pointer_ids.push(item.id.clone());
+                        if render(fx, ev, &next).len() <= budget {
+                            selection = next;
+                        }
+                    }
+                }
+            }
+        }
+        if real_prompt && ev.prompt.is_some() && !text.trim().is_empty() {
+            let mut end = text.len().min(400);
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            state.recent_prompts.push(text[..end].to_string());
+            let excess = state.recent_prompts.len().saturating_sub(2);
+            state.recent_prompts.drain(..excess);
+        }
         selection.used_bytes = render(fx, ev, &selection).len();
         selection
     }
@@ -619,6 +903,336 @@ mod tests {
         assert!(!safe_relative("../outside.ts"));
         assert!(safe_relative("api/src/x.ts"));
     }
+
+    use super::*;
+
+    fn note_fixture(rules: usize, benchmark: bool) -> (Fixture, Event) {
+        let mut fx = super::super::load_fixture("bench/fixture/v0").unwrap();
+        fx.config.workspace.min_score = 0.0;
+        fx.config.workspace.full_notes_max = 1;
+        let note_base = fx
+            .items
+            .iter()
+            .find(|i| is_note(i))
+            .cloned()
+            .expect("fixture has a note");
+        let rule_base = fx
+            .items
+            .iter()
+            .find(|i| !is_note(i) && i.kind != Kind::Law)
+            .cloned()
+            .expect("fixture has a rule");
+        let mut items = Vec::new();
+        for n in 0..8 {
+            let mut it = note_base.clone();
+            it.id = format!("note-{n}");
+            it.kind = Kind::Note;
+            it.status = Status::Active;
+            it.scope = "global".into();
+            it.triggers.keywords = vec!["zebra".into()];
+            it.triggers.paths.clear();
+            it.triggers.always = false;
+            it.importance = 0.5;
+            it.expires_at = None;
+            // note-7 is the most recent, so it scores highest; bodies never fit in full.
+            it.updated_at = format!("2026-01-0{}T00:00:00Z", n + 1);
+            it.body = "n".repeat(50_000);
+            items.push(it);
+        }
+        for r in 0..rules {
+            let mut it = rule_base.clone();
+            it.id = format!("rule-{r}");
+            it.status = Status::Active;
+            it.scope = "global".into();
+            it.triggers.keywords = vec!["zebra".into()];
+            it.triggers.paths.clear();
+            it.triggers.always = false;
+            it.importance = 0.9;
+            it.expires_at = None;
+            it.updated_at = "2026-01-09T00:00:00Z".into();
+            it.body = "r".repeat(50_000);
+            items.push(it);
+        }
+        fx.items = items;
+        let mut ev = fx.events[0].clone();
+        ev.prompt = Some("zebra herd".into());
+        ev.now = "2026-01-10T00:00:00Z".into();
+        ev.cwd = ".".into();
+        ev.allowed_scopes = if benchmark {
+            ["project:other".to_string()].into_iter().collect()
+        } else {
+            Default::default()
+        };
+        (fx, ev)
+    }
+
+    fn prompt_fixture() -> (Fixture, Event) {
+        let (mut fx, mut ev) = note_fixture(1, false);
+        ev.event_type = "user-prompt-submit".into();
+        fx.config.workspace.budget_bytes = 100_000;
+        for item in &mut fx.items {
+            item.body = "Short body".into();
+        }
+        (fx, ev)
+    }
+
+    #[test]
+    fn vague_prompts_inherit_only_recent_topics() {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.items[0].triggers.keywords = vec!["widget".into()];
+        let mut state = SessionState::default();
+        ev.prompt = Some("corrigir o widget".into());
+        E1.select(&fx, &ev, &mut state);
+        ev.prompt = Some("pode fazer o 2".into());
+        let inherited = E1.select(&fx, &ev, &mut state);
+        // One common inherited word: the note comes back (as an index line).
+        assert!(
+            inherited.full_ids.contains(&"note-0".into())
+                || inherited.pointer_ids.contains(&"note-0".into())
+        );
+        let fresh = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(fresh.full_ids.is_empty() && fresh.pointer_ids.is_empty());
+        ev.prompt = Some("please repair these other broken components".into());
+        let long = E1.select(&fx, &ev, &mut state);
+        assert!(long.full_ids.is_empty() && long.pointer_ids.is_empty());
+        assert_eq!(state.recent_prompts.len(), 2);
+        let saved = state.recent_prompts.clone();
+        ev.prompt = None;
+        let absent = E1.select(&fx, &ev, &mut state);
+        assert!(absent.full_ids.is_empty() && absent.pointer_ids.is_empty());
+        assert_eq!(state.recent_prompts, saved);
+        ev.event_type = "compaction".into();
+        state.begin_event(&ev);
+        assert_eq!(state.recent_prompts, saved);
+        ev.event_type = "session-start".into();
+        state.begin_event(&ev);
+        assert!(state.recent_prompts.is_empty());
+    }
+
+    #[test]
+    fn history_is_utf8_safe_and_old_states_load() {
+        let (fx, mut ev) = prompt_fixture();
+        let mut state: SessionState =
+            serde_json::from_str(r#"{"served":[],"touched":[]}"#).unwrap();
+        assert!(state.recent_prompts.is_empty());
+        ev.prompt = Some(format!("aa{}", "界".repeat(200)));
+        E1.select(&fx, &ev, &mut state);
+        assert_eq!(state.recent_prompts[0].len(), 398);
+    }
+
+    #[test]
+    fn rare_single_keywords_allow_full_notes_only_for_real_prompts() {
+        for keyword in ["150.000", "longkeyword", "widget", "zebra"] {
+            let rare = keyword.chars().any(char::is_numeric) || keyword.chars().count() >= 8;
+            for benchmark in [false, true] {
+                let (mut fx, mut ev) = prompt_fixture();
+                fx.items
+                    .retain(|item| item.id == "note-0" || !is_note(item));
+                fx.items[0].triggers.keywords = vec![keyword.into()];
+                ev.prompt = Some(keyword.into());
+                if benchmark {
+                    ev.allowed_scopes.push("global".into());
+                }
+                let sel = E1.select(&fx, &ev, &mut SessionState::default());
+                assert_eq!(sel.full_ids.contains(&"note-0".into()), !benchmark && rare);
+                assert_eq!(
+                    sel.pointer_ids.contains(&"note-0".into()),
+                    benchmark || !rare
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn image_only_prompts_use_top_unserved_project_rules() {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.config.projects = vec![crate::config::Project {
+            name: "app".into(),
+            root: "app".into(),
+            aliases: vec![],
+        }];
+        ev.cwd = "app/src".into();
+        ev.prompt = Some("[Image: source: /tmp/x/app/y.png] [Image #2]".into());
+        let base = fx.items.last().unwrap().clone();
+        fx.items = (0..5)
+            .map(|n| {
+                let mut item = base.clone();
+                item.id = format!("rule-{n}");
+                item.kind = if n == 3 { Kind::Law } else { Kind::Rule };
+                item.scope = "project:app".into();
+                item.importance = n as f64 / 5.0;
+                item.triggers.keywords = vec!["app".into()];
+                item
+            })
+            .collect();
+        let mut state = SessionState::default();
+        state.served.insert("rule-4".into());
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert_eq!(sel.full_ids, ["rule-3", "rule-2", "rule-1"]);
+        assert!(!sel.pointer_ids.contains(&"rule-4".into()));
+        assert!(state.recent_prompts.is_empty());
+        // History never hides the project rules of an image-only prompt.
+        let mut with_history = SessionState::default();
+        with_history.served.insert("rule-4".into());
+        with_history.recent_prompts = vec!["corrigir o widget".into()];
+        let mut note = base.clone();
+        note.id = "note-widget".into();
+        note.kind = Kind::Note;
+        note.scope = "global".into();
+        note.triggers.keywords = vec!["widget".into()];
+        fx.items.push(note);
+        let sel = E1.select(&fx, &ev, &mut with_history);
+        fx.items.pop();
+        assert_eq!(sel.full_ids, ["rule-3", "rule-2", "rule-1"]);
+        assert!(!sel.pointer_ids.contains(&"note-widget".into()));
+        let image_prompt = ev.prompt.clone();
+        ev.prompt = Some("[Image #2]".into());
+        ev.allowed_scopes.push("project:app".into());
+        let legacy = E1.select(&fx, &ev, &mut state);
+        assert!(legacy.full_ids.is_empty() && legacy.pointer_ids.is_empty());
+        ev.allowed_scopes.clear();
+        ev.event_type = "tool-use".into();
+        let legacy = E1.select(&fx, &ev, &mut state);
+        assert!(legacy.full_ids.is_empty() && legacy.pointer_ids.is_empty());
+        ev.event_type = "user-prompt-submit".into();
+        ev.prompt = image_prompt;
+        fx.items[3].body = "x".repeat(200_000);
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert!(sel.pointer_ids.contains(&"rule-3".into()));
+        assert!(sel.used_bytes <= fx.config.workspace.budget_bytes as usize);
+    }
+
+    #[test]
+    fn benchmark_and_other_events_keep_legacy_prompt_behavior() {
+        for benchmark in [false, true] {
+            let (mut fx, mut ev) = prompt_fixture();
+            fx.items[0].triggers.keywords = vec!["widget".into()];
+            if benchmark {
+                ev.allowed_scopes.push("global".into());
+            } else {
+                ev.event_type = "tool-use".into();
+            }
+            let mut state = SessionState {
+                recent_prompts: vec!["widget".into()],
+                ..Default::default()
+            };
+            ev.prompt = Some("please do it".into());
+            let sel = E1.select(&fx, &ev, &mut state);
+            assert!(sel.full_ids.is_empty() && sel.pointer_ids.is_empty());
+            assert_eq!(state.recent_prompts, ["widget"]);
+            ev.prompt = Some("[Image: source: /tmp/widget/image.png]".into());
+            let sel = E1.select(&fx, &ev, &mut state);
+            assert!(sel.pointer_ids.contains(&"note-0".into()));
+            ev.prompt = Some("[Image #2]".into());
+            let sel = E1.select(&fx, &ev, &mut state);
+            assert!(sel.full_ids.is_empty() && sel.pointer_ids.is_empty());
+        }
+    }
+
+    fn note_pointers(sel: &Selection) -> BTreeSet<String> {
+        sel.pointer_ids
+            .iter()
+            .filter(|id| id.starts_with("note-"))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn many_note_pointers_keep_only_the_best_five() {
+        let (fx, ev) = note_fixture(0, false);
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        let expected: BTreeSet<String> = ["note-7", "note-6", "note-5", "note-4", "note-3"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(note_pointers(&sel), expected);
+    }
+
+    #[test]
+    fn rule_pointers_are_never_capped() {
+        let (fx, ev) = note_fixture(2, false);
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(note_pointers(&sel).len(), MAX_NOTE_POINTERS);
+        assert!(sel.pointer_ids.contains(&"rule-0".to_string()));
+        assert!(sel.pointer_ids.contains(&"rule-1".to_string()));
+    }
+
+    #[test]
+    fn benchmark_mode_keeps_the_old_pointer_policy() {
+        let (fx, ev) = note_fixture(0, true);
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(note_pointers(&sel).len(), 8);
+    }
+
+    /// `ages` (hours before `ev.now`) become decisions `dec-0..` on the common word "widget".
+    fn recent_fixture(ages: &[i64]) -> (Fixture, Event) {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.config.workspace.full_notes_max = 2;
+        let base = fx.items[0].clone();
+        let now = DateTime::parse_from_rfc3339(&ev.now).unwrap();
+        fx.items = ages
+            .iter()
+            .enumerate()
+            .map(|(n, hours)| {
+                let mut item = base.clone();
+                item.id = format!("dec-{n}");
+                item.kind = Kind::Decision;
+                item.triggers.keywords = vec!["widget".into()];
+                item.updated_at = (now - chrono::Duration::hours(*hours)).to_rfc3339();
+                item
+            })
+            .collect();
+        ev.prompt = Some("o que falta para melhorar o widget".into());
+        (fx, ev)
+    }
+
+    #[test]
+    fn a_decision_from_10_hours_ago_comes_in_full_on_one_common_word() {
+        let (fx, ev) = recent_fixture(&[10]);
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(sel.full_ids, ["dec-0"]);
+        assert!(sel.pointer_ids.is_empty());
+    }
+
+    #[test]
+    fn the_same_decision_five_days_old_stays_a_pointer() {
+        let (fx, ev) = recent_fixture(&[5 * 24]);
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.full_ids.is_empty());
+        assert_eq!(sel.pointer_ids, ["dec-0"]);
+    }
+
+    #[test]
+    fn only_the_two_newest_recent_decisions_get_the_exception() {
+        let (fx, ev) = recent_fixture(&[30, 5, 20, 1]);
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        let full: BTreeSet<_> = sel.full_ids.iter().cloned().collect();
+        let pointers: BTreeSet<_> = sel.pointer_ids.iter().cloned().collect();
+        assert_eq!(full, ["dec-1", "dec-3"].map(String::from).into());
+        assert_eq!(pointers, ["dec-0", "dec-2"].map(String::from).into());
+    }
+
+    #[test]
+    fn a_match_only_through_the_history_gets_no_exception() {
+        let (fx, mut ev) = recent_fixture(&[10]);
+        let mut state = SessionState {
+            recent_prompts: vec!["corrigir o widget".into()],
+            ..Default::default()
+        };
+        ev.prompt = Some("pode fazer o 2".into());
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert!(sel.full_ids.is_empty());
+        assert_eq!(sel.pointer_ids, ["dec-0"]);
+    }
+
+    #[test]
+    fn benchmark_mode_ignores_the_recent_decision_exception() {
+        let (fx, mut ev) = recent_fixture(&[10]);
+        ev.allowed_scopes.push("global".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.full_ids.is_empty());
+        assert_eq!(sel.pointer_ids, ["dec-0"]);
+    }
 }
 
 #[cfg(test)]
@@ -653,7 +1267,7 @@ mod scope_v2_tests {
         let mut fx = super::super::load_fixture("bench/fixture/v0").unwrap();
         fx.config.projects = [
             ("pai", "Exemplo-Sistema"),
-            ("app", "Exemplo-Sistema/app-face"),
+            ("app", "Exemplo-Sistema/app-exemplo"),
             ("vazio", ""),
         ]
         .into_iter()
@@ -669,7 +1283,7 @@ mod scope_v2_tests {
         assert_eq!(scope.primary.as_deref(), Some("pai"));
         assert!(scope.projects.contains("app"));
         assert!(!scope.projects.contains("vazio"));
-        ev.cwd = "Exemplo-Sistema/app-face/src".into();
+        ev.cwd = "Exemplo-Sistema/app-exemplo/src".into();
         assert_eq!(resolve(&fx, &ev, &[], "").primary.as_deref(), Some("app"));
         ev.cwd = ".".into();
         let scope = resolve(&fx, &ev, &[], "");

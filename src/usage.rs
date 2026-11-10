@@ -1,5 +1,5 @@
 //! Automatic usefulness is evidence from tool inputs, never an owner's verdict.
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -24,7 +24,7 @@ fn identifier(word: &str) -> bool {
         && chars.all(|c| c == '_' || c.is_alphanumeric())
 }
 
-/// Keywords imported from BASE are often file names (`guard.rs`, `src/hook.rs`).
+/// Keywords imported from other memory tools are often file names (`guard.rs`, `src/hook.rs`).
 fn file_like(word: &str) -> bool {
     !word.contains(char::is_whitespace)
         && (word.contains('/')
@@ -237,4 +237,344 @@ pub fn record(
         tx.commit()?;
     }
     Ok(())
+}
+
+/// A response body is capped so the hook stays cheap even when the agent writes a lot.
+const MAX_ANALYZED: usize = 64 * 1024;
+
+/// Function words in English and Portuguese: too common to prove a rule was followed.
+const COMMON: &[&str] = &[
+    "about",
+    "after",
+    "against",
+    "agora",
+    "ainda",
+    "alguma",
+    "alguns",
+    "aliás",
+    "alterar",
+    "always",
+    "antes",
+    "apenas",
+    "around",
+    "arquivo",
+    "arquivos",
+    "através",
+    "because",
+    "before",
+    "between",
+    "change",
+    "changes",
+    "codigo",
+    "coisas",
+    "comando",
+    "commit",
+    "como",
+    "config",
+    "conteúdo",
+    "código",
+    "depois",
+    "deve",
+    "devem",
+    "different",
+    "durante",
+    "enquanto",
+    "então",
+    "everything",
+    "exactly",
+    "fazer",
+    "finalmente",
+    "funcao",
+    "função",
+    "given",
+    "however",
+    "including",
+    "incluir",
+    "instead",
+    "maybe",
+    "mesma",
+    "mesmo",
+    "multiple",
+    "never",
+    "nothing",
+    "outras",
+    "outros",
+    "porque",
+    "porém",
+    "possível",
+    "precisa",
+    "primeiro",
+    "project",
+    "projeto",
+    "qualquer",
+    "quando",
+    "really",
+    "result",
+    "resultado",
+    "retorno",
+    "return",
+    "script",
+    "sempre",
+    "server",
+    "servidor",
+    "should",
+    "similar",
+    "sobre",
+    "something",
+    "sometimes",
+    "string",
+    "struct",
+    "também",
+    "teste",
+    "testes",
+    "tests",
+    "through",
+    "todas",
+    "todos",
+    "update",
+    "usually",
+    "various",
+    "without",
+    "would",
+];
+
+/// Token characters keep `src/hook.rs` and `full_notes_max` in one piece.
+fn separator(c: char) -> bool {
+    !(c.is_alphanumeric() || matches!(c, '/' | '_' | '.'))
+}
+
+/// Sentence punctuation is not part of a word: `shipping.` and `src/` are `shipping` and `src`.
+fn trim_marks(token: &str) -> &str {
+    token.trim_matches(|c| matches!(c, '/' | '_' | '.'))
+}
+
+/// Cuts at most `limit` bytes without splitting a character.
+fn head(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let mut end = limit;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// Carries a digit or an inner `/`, `_`, `.`: an identifier, a path, a version.
+fn marked(token: &str) -> bool {
+    token.chars().any(|c| c.is_ascii_digit())
+        || token.contains('/')
+        || token.contains('_')
+        || token
+            .rsplit_once('.')
+            .is_some_and(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
+}
+
+/// Long or marked words that are specific enough to be looked for in a response.
+fn distinctive(lower: &str) -> bool {
+    let length = lower.chars().count();
+    if length < 3 || !lower.chars().any(char::is_alphanumeric) {
+        return false;
+    }
+    if marked(lower) {
+        return true;
+    }
+    length >= 6 && lower.chars().all(char::is_alphabetic) && !COMMON.contains(&lower)
+}
+
+fn distinctive_terms(body: &str) -> BTreeSet<String> {
+    let mut terms = BTreeSet::new();
+    for token in head(body, MAX_ANALYZED).split(separator) {
+        let lower = trim_marks(token).to_lowercase();
+        if distinctive(&lower) {
+            terms.insert(lower);
+        }
+    }
+    terms
+}
+
+/// The id as a whole word: `n01` inside `version01` or `n0` inside `n0-b` is not a citation.
+fn cites_id(item_id: &str, response: &str) -> bool {
+    if item_id.is_empty() {
+        return false;
+    }
+    let part = |c: char| c.is_alphanumeric() || matches!(c, '-' | '_');
+    response.match_indices(item_id).any(|(at, _)| {
+        let before = response[..at].chars().next_back();
+        let after = response[at + item_id.len()..].chars().next();
+        !before.is_some_and(part) && !after.is_some_and(part)
+    })
+}
+
+/// Long bodies are applied, not recited: this many shared terms is enough on its own.
+const ENOUGH_TERMS: usize = 8;
+
+/// Evidence that a response followed an item without the item naming a file:
+/// the item's id or a large enough share of its distinctive terms.
+pub fn response_uses(item_id: &str, body: &str, response: &str) -> bool {
+    // One pass over the response, never a scan per term: this runs on the hook path.
+    let response = head(response, MAX_ANALYZED);
+    if response.trim().is_empty() {
+        return false;
+    }
+    if cites_id(item_id, response) {
+        return true;
+    }
+    let terms = distinctive_terms(body);
+    // Two shared words are a coincidence, not a citation.
+    if terms.len() < 3 {
+        return false;
+    }
+    let mut seen = HashSet::new();
+    for token in response.split(separator) {
+        seen.insert(trim_marks(token).to_lowercase());
+    }
+    let matched = terms
+        .iter()
+        .filter(|term| seen.contains(term.as_str()))
+        .count();
+    matched >= 3 && (matched * 4 >= terms.len() || matched >= ENOUGH_TERMS)
+}
+
+/// Same opening, timeout and schema check as [`record`]; the evidence comes from the
+/// response text instead of tool input, so laws and decisions stop scoring 0%.
+pub fn record_response(
+    root: &Path,
+    session: &str,
+    seq: u64,
+    window: u64,
+    response: &str,
+) -> Result<usize, StoreError> {
+    if response.trim().is_empty() {
+        return Ok(0);
+    }
+    let mut conn = Connection::open_with_flags(
+        root.join(DATA_DIR).join(DB_FILE),
+        OpenFlags::SQLITE_OPEN_READ_WRITE,
+    )?;
+    // Short wait: parallel tools write at the same time; never long enough to stall a hook.
+    conn.busy_timeout(Duration::from_millis(100))?;
+    let version: String = conn.query_row(
+        "SELECT value FROM meta WHERE key='schema_version'",
+        [],
+        |r| r.get(0),
+    )?;
+    if version != SCHEMA_VERSION.to_string() {
+        return Ok(0);
+    }
+    let seq = i64::try_from(seq).unwrap_or(i64::MAX);
+    let lower = seq.saturating_sub(i64::try_from(window).unwrap_or(i64::MAX));
+    let mut query = conn.prepare(
+        "SELECT i.event_seq, i.item_id, i.kind, i.scope, t.body FROM injections i
+         JOIN items t ON t.id=i.item_id
+         WHERE i.session_id=?1 AND i.event_seq>=?2 AND i.event_seq<?3 AND i.mode='full'
+         AND NOT EXISTS (SELECT 1 FROM auto_usage u WHERE u.session_id=i.session_id
+         AND u.event_seq=i.event_seq AND u.item_id=i.item_id)",
+    )?;
+    let rows = query.query_map(rusqlite::params![session, lower, seq], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        ))
+    })?;
+    let mut signals = Vec::new();
+    for row in rows {
+        let (delivery, id, kind, scope, body) = row?;
+        if response_uses(&id, &body, response) {
+            signals.push((delivery, id, kind, scope));
+        }
+    }
+    drop(query);
+    if signals.is_empty() {
+        return Ok(0);
+    }
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let mut inserted = 0usize;
+    {
+        let mut insert = tx.prepare("INSERT OR IGNORE INTO auto_usage(session_id,event_seq,item_id,kind,scope,at) VALUES (?1,?2,?3,?4,?5,?6)")?;
+        let now = now_seconds();
+        for (delivery, id, kind, scope) in signals {
+            inserted +=
+                insert.execute(rusqlite::params![session, delivery, id, kind, scope, now])?;
+        }
+    }
+    tx.commit()?;
+    Ok(inserted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn literal_id_counts_even_without_a_body() {
+        assert!(response_uses("lev-1", "", "the rule lev-1 applies here"));
+        assert!(!response_uses("lev-1", "", "nothing to see"));
+    }
+
+    #[test]
+    fn three_shared_terms_are_enough() {
+        let body =
+            "When compiling, always run the checksum 84276fb and read src/hook.rs before shipping.";
+        let response = "I read src/hook.rs and verified 84276fb before shipping the crate.";
+        assert!(response_uses("item-1", body, response));
+    }
+
+    #[test]
+    fn shared_common_words_are_not_evidence() {
+        let body = "because should também quando sempre depois antes nunca porque before after always never através";
+        assert!(!response_uses("item-2", body, body));
+    }
+
+    #[test]
+    fn bodies_with_few_terms_never_match() {
+        let body = "deploy rollback";
+        assert!(!response_uses(
+            "item-3",
+            body,
+            "deploy rollback deploy rollback"
+        ));
+    }
+
+    #[test]
+    fn partial_words_do_not_match() {
+        let body = "handler serializer validators";
+        assert!(!response_uses(
+            "item-4",
+            body,
+            "handlers serializers validators"
+        ));
+        assert!(response_uses(
+            "item-4",
+            body,
+            "handler serializer validators"
+        ));
+    }
+
+    #[test]
+    fn the_utf8_cut_does_not_panic() {
+        // 90 kB of three-byte characters: the 64 KiB cut lands inside a character.
+        let body = "compiling checksum 84276fb shipping";
+        let response = "€".repeat(30_000);
+        assert!(!response_uses("item-5", body, &response));
+    }
+
+    #[test]
+    fn id_counts_only_as_a_whole_word() {
+        assert!(!response_uses("n01", "", "see version01 for details"));
+        assert!(!response_uses("n0", "", "the n0-b item"));
+        assert!(response_uses("n0", "", "item n0, applied"));
+    }
+
+    #[test]
+    fn long_bodies_need_eight_terms_not_a_quarter() {
+        let body: String = (0..60).map(|i| format!("termx{i:02}a ")).collect();
+        let response: String = (0..8).map(|i| format!("termx{i:02}a ")).collect();
+        assert!(response_uses("x", &body, &response));
+        let few: String = (0..7).map(|i| format!("termx{i:02}a ")).collect();
+        assert!(!response_uses("x", &body, &few));
+    }
 }

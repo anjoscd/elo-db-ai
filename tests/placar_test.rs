@@ -314,7 +314,7 @@ fn many_matching_deliveries_share_one_fast_commit() {
     assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 40);
 }
 
-/// Items imported from BASE carry file names as keywords, not path patterns.
+/// Items imported from another memory tool carry file names as keywords, not path patterns.
 #[test]
 fn file_name_keywords_match_the_touched_path_by_whole_component() {
     let (dir, store) = setup("rule");

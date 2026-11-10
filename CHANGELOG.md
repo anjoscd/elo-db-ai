@@ -6,12 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0]
+
 ### Added
 
-- Hook adapters for Codex, Gemini, Cursor and Copilot, native event aliases, deferred prompt context and edit-driven map synchronization.
-- `elo setup <tool> [--project]` prints hook/MCP configuration for nine tools without writing configuration files.
-- `elo export` generates scoped agent rules with preserved user text, safe filenames, obsolete-rule cleanup and dry-run previews.
-- Binary integration coverage for hook protocols, configuration snippets and rule exports.
+- `elo update [--check] [--version <VERSION>]` for manual, network-free-by-default self-updates. Uses the system `curl` to download release assets, verifies SHA-256 checksums, and atomically replaces the running binary while keeping the previous one as `<binary>.old`.
+- Prebuilt release binaries for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, packaged as `elo-<version>-<target>.tar.gz` with a `SHA256SUMS` file and attested build provenance.
+- Pointer limits, response-based usage signals, conversation subject matching, project-image association, rare-word handling and recent-decision recall in context selection.
+- `ELO_REPLAY_DUMP` support for replay benchmark output.
 
 ### Changed
 

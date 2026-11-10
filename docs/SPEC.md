@@ -1,6 +1,6 @@
 # ELO specification (v0.1, draft)
 
-This is a behavioral specification. It says **what** ELO must do and how that is checked, not how any existing tool does it. ELO is a clean-room implementation: contributors must not copy code from other context engines whose licenses are incompatible with Apache-2.0.
+This is a behavioral specification. It says **what** ELO must do and how that is checked, not how any existing tool does it. ELO is a clean-room implementation: contributors must not copy code from other context engines whose licenses are incompatible with the project license (FSL-1.1-ALv2).
 
 Key words MUST, SHOULD, MAY follow RFC 2119. Sections marked **(deferred)** are design intent, not a commitment for M0/M1.
 

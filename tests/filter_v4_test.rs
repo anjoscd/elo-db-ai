@@ -357,7 +357,8 @@ fn note_recency_stays_within_layers_and_after_rule_pointers() {
     let (s, _) = select(items, c, "a b revisor");
     assert_eq!(
         s.pointer_ids,
-        ["n10", "n01", "n00", "n03", "n02", "n05", "n04"]
+        // At most 5 note pointers (MAX_NOTE_POINTERS): the lowest scored note is cut.
+        ["n10", "n01", "n00", "n03", "n02", "n05"]
     );
 }
 

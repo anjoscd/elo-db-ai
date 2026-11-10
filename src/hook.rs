@@ -31,6 +31,8 @@ struct HookInput {
     defer_prompt: bool,
     #[serde(default)]
     suppress_pre_context: bool,
+    #[serde(default)]
+    transcript_path: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -41,6 +43,85 @@ struct Session {
     shown_work_project: Option<String>,
     #[serde(default)]
     pending_context: Option<String>,
+    /// event_seq of the last real prompt: its deliveries are scored against the answer.
+    #[serde(default)]
+    last_prompt_seq: u64,
+}
+
+/// Bytes read from the end of the transcript: enough for the last answer, cheap on the hook.
+const TRANSCRIPT_TAIL: u64 = 512 * 1024;
+
+/// Visible text of the last answer (Claude Code transcript JSONL): assistant `text` blocks
+/// after the previous user prompt. Thinking and tool calls are not the answer. Any error
+/// gives an empty string; a transcript in another format simply yields nothing.
+fn last_answer(path: &Path) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = fs::File::open(path) else {
+        return String::new();
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(TRANSCRIPT_TAIL);
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if start > 0 && !lines.is_empty() {
+        lines.remove(0); // first line may be cut in the middle
+    }
+    let mut parts: Vec<String> = Vec::new();
+    let mut seen_answer = false;
+    let mut skipped_new_prompt = false;
+    for line in lines.iter().rev() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let content = value.pointer("/message/content");
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("assistant") => {
+                seen_answer = true;
+                // Walking backwards: blocks of one message are taken last to first too.
+                if let Some(t) = content.and_then(serde_json::Value::as_str) {
+                    parts.push(t.to_string());
+                }
+                for block in content
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .rev()
+                {
+                    if block.get("type").and_then(serde_json::Value::as_str) == Some("text") {
+                        if let Some(t) = block.get("text").and_then(serde_json::Value::as_str) {
+                            parts.push(t.to_string());
+                        }
+                    }
+                }
+            }
+            Some("user") => {
+                let is_prompt = content.is_some_and(|c| {
+                    c.is_string()
+                        || c.as_array().is_some_and(|a| {
+                            a.iter().any(|b| {
+                                b.get("type").and_then(serde_json::Value::as_str) == Some("text")
+                            })
+                        })
+                });
+                // The new prompt may already be written (no answer after it yet): skip it.
+                // Any other prompt ends the answer, even one with no visible text, so an
+                // older turn is never taken for the last one.
+                if is_prompt {
+                    if seen_answer || skipped_new_prompt {
+                        break;
+                    }
+                    skipped_new_prompt = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    parts.reverse();
+    parts.join("\n")
 }
 
 /// Local heuristic: checks lines and their concatenation before the cut.
@@ -305,6 +386,23 @@ fn log_error(root: &Path, message: &str) {
     }
 }
 
+/// Prompts that come from the agent runtime (subagent messages, system reminders,
+/// notifications, etc.) carry many unrelated keywords and must not trigger rules.
+fn is_automatic_prompt(prompt: &str) -> bool {
+    let trimmed = prompt.trim_start();
+    [
+        "<agent-message",
+        "<task-notification",
+        "<system-reminder",
+        "[SYSTEM NOTIFICATION",
+        "Another Claude session sent a message",
+        "<local-command",
+        "<command-name",
+    ]
+    .iter()
+    .any(|marker| trimmed.starts_with(marker))
+}
+
 /// Runs one hook event in shadow mode. Returns Ok(()) even when ELO is not set up here.
 pub fn shadow(event_name: &str, stdin: &str) -> Result<(), String> {
     prepare(event_name, stdin).map(|_| ())
@@ -316,7 +414,19 @@ pub fn prepare(event_name: &str, stdin: &str) -> Result<Option<String>, String> 
         Ok(input) => input,
         Err(e) => {
             if let Some(root) = std::env::current_dir().ok().as_deref().and_then(find_root) {
-                log_error(&root, &format!("bad hook input: {e}"));
+                // Event and masked shape only (letters and digits become 'x'): never the content.
+                let shape: String = stdin
+                    .chars()
+                    .take(24)
+                    .map(|c| if c.is_alphanumeric() { 'x' } else { c })
+                    .collect();
+                log_error(
+                    &root,
+                    &format!(
+                        "bad hook input ({event_name}, {} bytes, shape {shape:?}): {e}",
+                        stdin.len()
+                    ),
+                );
             }
             return Err(format!("bad hook input: {e}"));
         }
@@ -398,7 +508,25 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
         .unwrap_or_default();
 
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-    let ev: Event = serde_json::from_value(serde_json::json!({
+    let automatic = event_name == "user-prompt-submit"
+        && input.prompt.as_deref().is_some_and(is_automatic_prompt);
+    if event_name == "user-prompt-submit" && !automatic {
+        // Laws and decisions rarely name a file: the answer to the previous prompt is the
+        // evidence. Automatic evidence must never prevent the hook from completing.
+        if let (Some(path), true) = (&input.transcript_path, session.last_prompt_seq > 0) {
+            let answer = last_answer(Path::new(path));
+            let window = session.seq.saturating_sub(session.last_prompt_seq);
+            let _ = crate::usage::record_response(
+                root,
+                &input.session_id,
+                session.seq,
+                window,
+                &answer,
+            );
+        }
+        session.last_prompt_seq = session.seq;
+    }
+    let mut ev: Event = serde_json::from_value(serde_json::json!({
         "id": format!("{}:{}", input.session_id, session.seq),
         "event_type": event_name,
         "session_id": input.session_id,
@@ -411,6 +539,9 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
         "allowed_scopes": [], "required": [], "forbidden": []
     }))
     .map_err(|e| e.to_string())?;
+    if automatic {
+        ev.prompt = None;
+    }
     session.state.begin_event(&ev);
 
     let mut output = if event_name == "post-tool-use" {
@@ -502,7 +633,8 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
         let record = serde_json::json!({
             "at": now, "session_id": input.session_id, "event_seq": session.seq,
             "prompt": input.prompt.as_deref().map(logged_prompt),
-            "cwd": ev.cwd, "full_ids": selection.full_ids, "pointer_ids": selection.pointer_ids,
+            "automatic": automatic, "cwd": ev.cwd, "full_ids": selection.full_ids,
+            "pointer_ids": selection.pointer_ids,
             "used_bytes": selection.used_bytes, "rendered": rendered,
         });
         // Lines can exceed PIPE_BUF: appends from parallel sessions go through a lock.
@@ -574,7 +706,8 @@ fn recently_delivered(
 
 #[cfg(test)]
 mod tests {
-    use super::logged_prompt;
+    use super::{last_answer, logged_prompt};
+    use std::fs;
 
     #[test]
     fn prompt_cut_is_bytes_and_utf8_safe() {
@@ -680,5 +813,42 @@ mod tests {
         }
         let short = format!("Aa0{}", "z".repeat(28));
         assert_eq!(logged_prompt(&short), short);
+    }
+
+    #[test]
+    fn last_answer_takes_only_visible_text_after_the_previous_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"first prompt"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"old answer"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"second prompt"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"secret plan"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"part one"}]}}"#,
+            "not json",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"part two"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"new prompt already written"}}"#,
+        ];
+        fs::write(&path, lines.join("\n")).unwrap();
+        assert_eq!(last_answer(&path), "part one\npart two");
+        assert_eq!(last_answer(&dir.path().join("missing.jsonl")), "");
+        let only_tools = [
+            r#"{"type":"user","message":{"role":"user","content":"old prompt"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"old answer"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"previous prompt"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"new prompt"}}"#,
+        ];
+        fs::write(&path, only_tools.join("\n")).unwrap();
+        assert_eq!(last_answer(&path), "");
+        let blocks = [
+            r#"{"type":"user","message":{"role":"user","content":"p"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}}"#,
+            r#"{"type":"assistant","message":{"content":"c"}}"#,
+        ];
+        fs::write(&path, blocks.join("\n")).unwrap();
+        assert_eq!(last_answer(&path), "a\nb\nc");
     }
 }

@@ -4,6 +4,30 @@ Motor local de contexto e memória para agentes de código, escrito em Rust. Fun
 
 [English](README.md) · [Especificação](docs/SPEC.md) · [Avaliação](docs/EVALUATION.md) · [Pesquisa](docs/RESEARCH.md) · [Histórico de alterações](CHANGELOG.md)
 
+## Por que o ELO
+
+**Por que usamos.** Um agente só segue a regra que ele enxerga na hora em que age. Colar todas as regras em todo pedido desperdiça contexto e esconde a que importa; deixar as regras de fora faz o agente repetir erros antigos. O ELO manda as poucas regras e decisões que valem para *este* pedido, *este* projeto e *este* arquivo, e lista o resto como ponteiros curtos. Num teste às cegas com pedidos reais, ele venceu a injeção de todas as regras em 74% dos casos decididos, enviando cerca de um quarto dos bytes (≈1,4 KB contra ≈5,4 KB por pedido).
+
+**Tecnologias.**
+
+| Parte | Tecnologia |
+|---|---|
+| Motor | Rust (um binário só, sem runtime) |
+| Memória | SQLite com busca de texto FTS5 |
+| Mapa de código | tree-sitter (quem chama quem, importações em JavaScript/TypeScript) |
+| Integração | servidor MCP (stdio) + adaptadores de ganchos para Claude Code, Codex, Gemini CLI, Cursor, GitHub Copilot |
+| Opcional | embeddings estáticos locais (formato model2vec), desligados por padrão |
+
+**Por que deixa a programação mais segura.**
+
+- **Nada sai da sua máquina.** Sem chamadas de rede e sem telemetria; memória, índices e registros ficam em `.elo/`. A única exceção é o comando manual `elo update` (a partir da 0.2.0), que só roda quando você digita.
+- **A regra certa antes do passo arriscado.** Regras presas a arquivos (migrations, scripts de publicação, configuração) chegam logo antes de o agente ler ou editar esses arquivos.
+- **Travas em comandos perigosos.** Travas configuráveis registram, pedem confirmação ou barram a chamada (ex.: push forçado, publicação, apagar).
+- **Só você escreve as leis.** Leis exigem `--as-user`; o agente não cria nem promove leis sozinho.
+- **Sem contexto velho ou misturado.** Decisões superadas deixam de ser entregues, e itens de outro projeto chegam só como ponteiro.
+- **Segredos fora dos registros.** Chaves e tokens são removidos dos pedidos antes de qualquer gravação.
+- **Auditável.** `elo explain` e `elo stats` mostram por que cada item foi enviado e se foi usado.
+
 ## O problema
 
 Agentes de código esquecem regras e decisões entre conversas. Carregar toda a memória em cada pedido consome contexto e pode trazer informações desatualizadas ou sem relação com o trabalho. Um sistema de memória útil precisa entregar a regra certa quando o agente está prestes a precisar dela, mantendo o restante disponível para consulta.
@@ -46,6 +70,23 @@ elo doctor
 ```
 
 `elo init` cria `.elo/` e um `elo.toml` com padrões e projetos descobertos, preservando uma configuração existente. Execute os comandos da pasta de trabalho na raiz dela. Os ganchos localizam essa raiz pelo `cwd` do evento.
+
+## Atualização
+
+O ELO nunca se atualiza sozinho, executa atualizações em ganchos ou dispara atualizações pelo servidor MCP. Para atualizar o binário `elo` manualmente:
+
+```sh
+# consulta a versão atual e a mais nova sem baixar nada
+elo update --check
+
+# instala o release mais recente para a sua plataforma
+elo update
+
+# instala um release específico
+elo update --version 0.2.0
+```
+
+O comando usa o `curl` do sistema (com `--fail --location --proto =https --tlsv1.2`) para baixar o arquivo da release correspondente e o seu `SHA256SUMS`, verifica o digest SHA-256, extrai o binário `elo` e substitui atomicamente o binário atual, mantendo o anterior como `elo.old`.
 
 ## Usar em qualquer IDE (MCP)
 
@@ -275,9 +316,14 @@ cargo clippy --all-targets -- -D warnings
 
 Para alterações no seletor, compare a saída do benchmark e explique o efeito. As contribuições devem ser originais ou compatíveis com a licença do projeto.
 
-## Licença
+## Licença e forks
 
-[Apache License 2.0](LICENSE).
+[Functional Source License 1.1, ALv2 Future License (FSL-1.1-ALv2)](LICENSE). Em resumo:
+
+- **Uso livre:** pessoas e empresas podem usar, modificar e fazer **fork** do ELO, inclusive no trabalho e dentro dos próprios produtos e projetos.
+- **Proibido sem licença do autor:** oferecer o próprio ELO, ou um produto ou serviço que **concorra** com ele (por exemplo vendê-lo ou hospedá-lo como serviço pago). Para uma licença comercial, entre em contato com o autor pelas [issues do GitHub](https://github.com/anjoscd/elo-db-ai/issues).
+- **Vira Apache 2.0:** cada versão passa a ser Apache License 2.0 dois anos depois de lançada.
+- **Crédito obrigatório:** forks e cópias alteradas precisam manter os arquivos [LICENSE](LICENSE) e [NOTICE](NOTICE), dar o crédito a **ELO-DB-AI, de anjoscd** (https://github.com/anjoscd/elo-db-ai) e informar quais arquivos foram alterados.
 
 ## Outras ferramentas de programação
 

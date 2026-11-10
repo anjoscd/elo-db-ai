@@ -11,6 +11,8 @@ pub trait Selector {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionState {
     pub served: BTreeSet<String>,
+    #[serde(default)]
+    pub recent_prompts: Vec<String>,
     /// Files touched in this session, with the event_seq of the last touch.
     pub touched: Vec<(String, u64)>,
 }
@@ -20,6 +22,10 @@ impl SessionState {
         if matches!(ev.event_type.as_str(), "compaction" | "session-start") {
             self.served.clear();
             self.touched.clear();
+            // The topic survives a compaction; only a new session forgets it.
+            if ev.event_type == "session-start" {
+                self.recent_prompts.clear();
+            }
         }
         for path in ev.tool_paths.iter().flatten() {
             self.touched.retain(|(p, _)| p != path);

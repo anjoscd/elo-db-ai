@@ -215,6 +215,15 @@ enum Command {
     },
     /// Show discovered projects and git worktrees (read-only).
     Discover,
+    /// Update this binary to the latest release (manual only).
+    Update {
+        /// Only show current and latest versions; do not download anything.
+        #[arg(long)]
+        check: bool,
+        /// Install a specific version instead of the latest one.
+        #[arg(long = "version", value_name = "VERSION")]
+        version: Option<String>,
+    },
     /// Code map: sync the index and query entities (SPEC §7).
     Map {
         #[command(subcommand)]
@@ -529,6 +538,31 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Discover => run_discover(root),
+        Command::Update { check, version } => {
+            let current_exe =
+                std::env::current_exe().map_err(|e| AppError::Internal(e.to_string()))?;
+            let current_version = env!("CARGO_PKG_VERSION");
+            let version = version.as_ref().map(|v| {
+                let v = v.trim();
+                v.strip_prefix(['v', 'V']).unwrap_or(v).to_string()
+            });
+            if let Some(ref v) = version {
+                if !elo_ctx::update::is_valid_version(v) {
+                    return Err(AppError::Usage(format!("invalid version: {v}")));
+                }
+            }
+            let opts = elo_ctx::update::UpdateOpts { check, version };
+            let fetcher = elo_ctx::update::CurlFetcher;
+            let result = elo_ctx::update::run(&opts, current_version, &current_exe, &fetcher)
+                .map_err(|e| match e {
+                    elo_ctx::update::Error::CurlNotFound => {
+                        AppError::Usage("curl is required for `elo update`".into())
+                    }
+                    _ => AppError::Usage(e.to_string()),
+                })?;
+            let _ = result;
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Map { cmd } => run_map(root, cmd),
         Command::Import {
             file,
