@@ -60,6 +60,8 @@ pub struct Item {
     pub origin: Origin,
     #[serde(skip_deserializing)]
     pub feedback: crate::stats::Feedback,
+    #[serde(skip_deserializing)]
+    pub usage_window: crate::stats::UsageWindow,
 }
 
 #[derive(Debug, Clone, Deserialize)]

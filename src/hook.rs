@@ -631,6 +631,15 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
         };
         let mut items = load_items(&store).map_err(|e| e.to_string())?;
         items.retain(|item| deliverable(item, Utc::now()));
+        if config.workspace.demote_unused_min > 0 {
+            let mut windows = store.unused_windows(
+                crate::store::now_seconds(),
+                config.workspace.demote_unused_days,
+            );
+            for item in &mut items {
+                item.usage_window = windows.remove(&item.id).unwrap_or_default();
+            }
+        }
         let fx = live_fixture(root, config.clone(), items);
         let mut selection = E1.select(&fx, &ev, &mut session.state);
         let seq = i64::try_from(session.seq).unwrap_or(i64::MAX);

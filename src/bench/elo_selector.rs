@@ -27,11 +27,6 @@ const CROSS_MATCH_PENALTY: f64 = 0.7;
 
 /// Cap on note/decision pointers: past five, index lines crowd out the answer.
 const MAX_NOTE_POINTERS: usize = 5;
-/// A note/decision updated at most this long ago (seconds) may come in full on one common word.
-const RECENT_NOTE_SECS: i64 = 48 * 3600;
-/// At most this many recent single-word notes per prompt get that exception.
-const MAX_RECENT_NOTES: usize = 2;
-
 /// Prompt text with code removed (SPEC §3.1: words in code never trigger):
 /// indented lines, fenced blocks (a run of 3+ backticks or tildes, anywhere, up to the
 /// next run of the same length, across lines) and inline spans (1–2 backticks, same line).
@@ -654,8 +649,6 @@ impl Selector for E1 {
         let now = DateTime::parse_from_rfc3339(&ev.now).ok();
 
         let mut indexed = BTreeSet::new();
-        // Recent single-word notes that may skip the index (at most `MAX_RECENT_NOTES`).
-        let mut recent_notes: Vec<&Item> = Vec::new();
         let mut laws: Vec<&Item> = Vec::new();
         let mut scored: Vec<(f64, &Item)> = Vec::new();
         // Each cross-project pointer candidate stores the item and how many of its keywords matched.
@@ -708,6 +701,14 @@ impl Selector for E1 {
                 laws.push(item);
                 continue;
             }
+            if real_mode
+                && !path_hit
+                && item
+                    .usage_window
+                    .demoted(item.kind, fx.config.workspace.demote_unused_min)
+            {
+                indexed.insert(item.id.clone());
+            }
             if is_note(item)
                 && fx.config.workspace.full_notes_max > 0
                 && !path_hit
@@ -722,21 +723,8 @@ impl Selector for E1 {
                         .iter()
                         .any(|k| k.chars().any(|c| c.is_numeric()) || k.chars().count() >= 8))
             {
-                // Real prompts: a note/decision updated in the last 48 h that matched the
-                // current text (not only the history) may still come in full (top 2 only).
-                let recent = real_prompt
-                    && kw.iter().any(|k| has_word(&text, k))
-                    && match (now, DateTime::parse_from_rfc3339(&item.updated_at)) {
-                        (Some(now), Ok(upd)) => {
-                            (0..RECENT_NOTE_SECS).contains(&(now - upd).num_seconds())
-                        }
-                        _ => false,
-                    };
-                if recent {
-                    recent_notes.push(item);
-                } else {
-                    indexed.insert(item.id.clone());
-                }
+                // An update within the last 48 hours does not waive trigger specificity.
+                indexed.insert(item.id.clone());
             }
             if kw.is_empty()
                 && !path_hit
@@ -785,17 +773,6 @@ impl Selector for E1 {
             if score >= fx.config.workspace.min_score {
                 scored.push((score, item));
             }
-        }
-
-        // Only the most recent ones keep the exception; the rest go back to the index.
-        recent_notes.sort_by(|a, b| {
-            DateTime::parse_from_rfc3339(&b.updated_at)
-                .ok()
-                .cmp(&DateTime::parse_from_rfc3339(&a.updated_at).ok())
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        for item in recent_notes.iter().skip(MAX_RECENT_NOTES) {
-            indexed.insert(item.id.clone());
         }
 
         let budget = usize::try_from(fx.config.workspace.budget_bytes).unwrap_or(usize::MAX);
@@ -986,6 +963,26 @@ impl Selector for E1 {
                         break;
                     }
                     if selection.full_ids.contains(&item.id) {
+                        continue;
+                    }
+                    let path_hit = item
+                        .triggers
+                        .paths
+                        .iter()
+                        .any(|p| touched.iter().any(|t| path_matches(p, t)));
+                    if ev.allowed_scopes.is_empty()
+                        && !path_hit
+                        && item
+                            .usage_window
+                            .demoted(item.kind, fx.config.workspace.demote_unused_min)
+                    {
+                        if !selection.pointer_ids.contains(&item.id) {
+                            let mut next = selection.clone();
+                            next.pointer_ids.push(item.id.clone());
+                            if render(fx, ev, &next).len() <= budget {
+                                selection = next;
+                            }
+                        }
                         continue;
                     }
                     let mut next = selection.clone();
@@ -1768,11 +1765,23 @@ mod tests {
     }
 
     #[test]
-    fn a_decision_from_10_hours_ago_comes_in_full_on_one_common_word() {
+    fn recent_decision_with_one_common_word_stays_a_pointer() {
         let (fx, ev) = recent_fixture(&[10]);
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
-        assert_eq!(sel.full_ids, ["dec-0"]);
-        assert!(sel.pointer_ids.is_empty());
+        assert!(sel.full_ids.is_empty());
+        assert_eq!(sel.pointer_ids, ["dec-0"]);
+    }
+
+    #[test]
+    fn recent_decision_requires_a_specific_word_or_two_words() {
+        for words in [vec!["widget42"], vec!["payments"], vec!["widget", "view"]] {
+            let (mut fx, mut ev) = recent_fixture(&[10]);
+            fx.items[0].triggers.keywords = words.iter().map(|s| (*s).into()).collect();
+            ev.prompt = Some(words.join(" "));
+            let sel = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(sel.full_ids, ["dec-0"]);
+            assert!(sel.pointer_ids.is_empty());
+        }
     }
 
     #[test]
@@ -1784,13 +1793,18 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_newest_recent_decisions_get_the_exception() {
+    fn recent_decisions_with_a_common_word_stay_as_pointers() {
         let (fx, ev) = recent_fixture(&[30, 5, 20, 1]);
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
         let full: BTreeSet<_> = sel.full_ids.iter().cloned().collect();
         let pointers: BTreeSet<_> = sel.pointer_ids.iter().cloned().collect();
-        assert_eq!(full, ["dec-1", "dec-3"].map(String::from).into());
-        assert_eq!(pointers, ["dec-0", "dec-2"].map(String::from).into());
+        assert!(full.is_empty());
+        assert_eq!(
+            pointers,
+            ["dec-0", "dec-1", "dec-2", "dec-3"]
+                .map(String::from)
+                .into()
+        );
     }
 
     #[test]

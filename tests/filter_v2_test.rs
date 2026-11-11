@@ -124,12 +124,16 @@ fn replay_agrega_sem_expor_conteudo_e_isola_sessoes() {
 #[test]
 fn configuracao_limites_e_raizes_invalidas() {
     let c = Config::parse(
-        "[workspace]\nindex_over_bytes=0\ndemote_bad_min=7",
+        "[workspace]\nindex_over_bytes=0\ndemote_bad_min=7\ndemote_unused_min=8\ndemote_unused_days=21",
         std::path::Path::new("teste"),
     )
     .unwrap();
     assert_eq!(c.workspace.index_over_bytes, 0);
     assert_eq!(c.workspace.demote_bad_min, 7);
+    assert_eq!(c.workspace.demote_unused_min, 8);
+    assert_eq!(c.workspace.demote_unused_days, 21);
+    assert_eq!(Config::default().workspace.demote_unused_min, 6);
+    assert_eq!(Config::default().workspace.demote_unused_days, 14);
     assert!(Config::parse(
         "[[project]]\nname='a'\nroot=''",
         std::path::Path::new("teste")
@@ -424,4 +428,245 @@ fn fixture_nao_aceita_feedback_forjado() {
     });
     // deny_unknown_fields rejects the skipped input field rather than trusting it.
     assert!(serde_json::from_value::<Item>(input).is_err());
+}
+
+#[test]
+fn unused_demotion_only_applies_to_eligible_kinds_in_real_mode() {
+    let mut fx = live_fixture(std::path::Path::new("."), Config::default(), vec![item()]);
+    fx.config.workspace.index_over_bytes = 0;
+    fx.config.workspace.full_notes_max = 0;
+    fx.config.workspace.min_score = 0.0;
+    let mut ev = event();
+    ev.prompt = Some("foco".into());
+    for kind in [Kind::Decision, Kind::Rule, Kind::Note, Kind::Law] {
+        fx.items[0].kind = kind;
+        for (full_events, auto_used, agent_used, minimum, benchmark, expected) in [
+            (5, 0, 0, 6, false, false),
+            (6, 0, 0, 6, false, true),
+            (6, 1, 0, 6, false, false),
+            (6, 0, 1, 6, false, false),
+            (6, 0, 0, 0, false, false),
+            (6, 0, 0, 6, true, false),
+        ] {
+            fx.items[0].usage_window = elo_ctx::stats::UsageWindow {
+                full_events,
+                auto_used,
+                agent_used,
+            };
+            fx.config.workspace.demote_unused_min = minimum;
+            ev.allowed_scopes = if benchmark {
+                vec!["global".into()]
+            } else {
+                vec![]
+            };
+            let sel = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(
+                sel.pointer_ids.contains(&"r".into()),
+                expected && kind != Kind::Law
+            );
+            assert_eq!(
+                sel.full_ids.contains(&"r".into()),
+                !expected || kind == Kind::Law
+            );
+        }
+    }
+}
+
+#[test]
+fn unused_window_deduplicates_events_and_expires() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = elo_ctx::store::Store::open(dir.path()).unwrap();
+    let now = 2_000_000;
+    store
+        .conn
+        .execute_batch(
+            "INSERT INTO injections VALUES
+        ('s',1,'r','full','rule','global',1000000),
+        ('s',1,'r','full','rule','global',1000000),
+        ('s',2,'r','pointer','rule','global',1000000),
+        ('t',1,'r','full','rule','global',1000000),
+        ('s',3,'r','full','rule','global',1);
+        INSERT INTO auto_usage VALUES ('s',1,'r','rule','global',1);
+        INSERT INTO agent_feedback VALUES ('s',1,'r','ignored',0,1000000);",
+        )
+        .unwrap();
+    let windows = store.unused_windows(now, 14);
+    let w = &windows["r"];
+    assert_eq!((w.full_events, w.auto_used, w.agent_used), (2, 0, 0));
+    assert!(w.demoted(Kind::Rule, 2));
+    assert!(store.unused_windows(now + 14 * 86400, 14).is_empty());
+    store
+        .conn
+        .execute_batch(
+            "INSERT INTO auto_usage VALUES ('t',1,'r','rule','global',1000000);
+        INSERT INTO agent_feedback VALUES ('t',1,'r','used',0,1000000);",
+        )
+        .unwrap();
+    let windows = store.unused_windows(now, 14);
+    assert_eq!((windows["r"].auto_used, windows["r"].agent_used), (1, 1));
+    store
+        .conn
+        .execute_batch("DROP TABLE agent_feedback")
+        .unwrap();
+    assert!(store.unused_windows(now, 14).is_empty());
+}
+
+#[test]
+fn hook_stats_and_explain_observe_unused_demotion() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    elo_ctx::init::init(dir.path()).unwrap();
+    let store = elo_ctx::store::Store::open(dir.path()).unwrap();
+    store
+        .insert_item(&elo_ctx::store::NewItem {
+            id: "r",
+            kind: "rule",
+            scope: "global",
+            title: "Regra visível",
+            body: "CONTEUDO_COMPLETO_DISTINTO",
+            origin: "agent",
+        })
+        .unwrap();
+    store
+        .conn
+        .execute_batch("UPDATE items SET triggers='{\"always\":true,\"keywords\":[],\"paths\":[]}'")
+        .unwrap();
+    let now = elo_ctx::store::now_seconds();
+    for seq in 0..6 {
+        store
+            .conn
+            .execute(
+                "INSERT INTO injections VALUES ('anterior',?1,'r','full','rule','global',?2)",
+                rusqlite::params![seq, now],
+            )
+            .unwrap();
+    }
+    let cli = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_elo"))
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+    assert!(cli(&["stats"]).contains("demoted (unused)   1"));
+    for status in ["archived", "superseded", "expired"] {
+        store
+            .conn
+            .execute("UPDATE items SET status=?1 WHERE id='r'", [status])
+            .unwrap();
+        assert!(cli(&["stats"]).contains("demoted (unused)   0"));
+    }
+    store
+        .conn
+        .execute("UPDATE items SET status='active' WHERE id='r'", [])
+        .unwrap();
+    let config_path = dir.path().join("elo.toml");
+    let original_config = std::fs::read_to_string(&config_path).unwrap();
+    std::fs::write(
+        &config_path,
+        original_config.replace("[workspace]", "[workspace]\ndemote_unused_min = 0"),
+    )
+    .unwrap();
+    assert!(cli(&["stats"]).contains("demoted (unused)   0"));
+    std::fs::write(&config_path, original_config).unwrap();
+
+    let report = cli(&["explain", "r"]);
+    assert!(report.contains("demoted (unused): yes; pointer"));
+    assert!(report.contains("full events=6, auto uses=0, agent used=0, window=14 days"));
+    for (session, full) in [("nova", false), ("apos_uso", true)] {
+        if full {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO auto_usage VALUES ('anterior',0,'r','rule','global',?1)",
+                    [now],
+                )
+                .unwrap();
+        }
+        let mut child = Command::new(env!("CARGO_BIN_EXE_elo"))
+            .current_dir(dir.path())
+            .args(["hook", "user-prompt-submit", "--live"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let input =
+            serde_json::json!({"session_id":session,"cwd":dir.path(),"prompt":"verificar projeto"});
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        if !full {
+            assert!(text.contains("Regra visível"), "{text}");
+        }
+        assert_eq!(text.contains("CONTEUDO_COMPLETO_DISTINTO"), full);
+    }
+}
+
+#[test]
+fn empty_prompt_does_not_promote_a_demoted_rule() {
+    let config = Config::parse(
+        "[[project]]\nname='projeto'\nroot='.'",
+        std::path::Path::new("."),
+    )
+    .unwrap();
+    let mut fx = live_fixture(std::path::Path::new("."), config, vec![item()]);
+    fx.items[0].scope = "project:projeto".into();
+    fx.items[0].triggers.always = false;
+    fx.items[0].usage_window.full_events = 6;
+    let mut ev = event();
+    ev.prompt = Some(String::new());
+    let sel = E1.select(&fx, &ev, &mut SessionState::default());
+    assert!(sel.full_ids.is_empty());
+    assert_eq!(sel.pointer_ids, ["r"]);
+}
+
+#[test]
+fn touched_paths_keep_unused_items_in_full() {
+    let mut fx = live_fixture(std::path::Path::new("."), Config::default(), vec![item()]);
+    let ev = event();
+    for kind in [Kind::Rule, Kind::Note, Kind::Decision] {
+        fx.items[0].kind = kind;
+        fx.items[0].usage_window.full_events = 6;
+        let mut state = SessionState::default();
+        state.touched.push(("src/a.rs".into(), 1));
+        let selected = E1.select(&fx, &ev, &mut state);
+        assert_eq!(selected.full_ids, ["r"]);
+        assert!(selected.pointer_ids.is_empty());
+    }
+}
+
+#[test]
+fn project_rules_preserve_benchmark_selection_with_unused_history() {
+    let config = Config::parse(
+        "[[project]]\nname='project'\nroot='.'",
+        std::path::Path::new("."),
+    )
+    .unwrap();
+    let mut fx = live_fixture(std::path::Path::new("."), config, vec![item()]);
+    fx.items[0].scope = "project:project".into();
+    fx.items[0].triggers.always = true;
+    fx.config.workspace.min_score = 0.0;
+    fx.config.workspace.index_over_bytes = 0;
+    let mut ev = event();
+    ev.prompt = Some(String::new());
+    ev.allowed_scopes = vec!["project:project".into()];
+    let before = E1.select(&fx, &ev, &mut SessionState::default());
+    assert_eq!(before.full_ids, ["r"]);
+    fx.items[0].usage_window.full_events = 6;
+    let after = E1.select(&fx, &ev, &mut SessionState::default());
+    assert_eq!(after.full_ids, before.full_ids);
+    assert_eq!(after.pointer_ids, before.pointer_ids);
 }

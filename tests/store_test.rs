@@ -247,3 +247,43 @@ fn v2_migrates_feedback_index_without_losing_data_and_is_idempotent() {
         .unwrap();
     assert_eq!(version, "2");
 }
+
+#[test]
+fn version_five_gains_optional_index_without_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    store
+        .conn
+        .execute_batch(
+            "DROP INDEX injections_unused_window;
+         INSERT INTO injections VALUES ('s',1,'r','full','rule','global',1000000);",
+        )
+        .unwrap();
+    drop(store);
+    for _ in 0..2 {
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 5);
+        assert_eq!(store.unused_windows(1000001, 14)["r"].full_events, 1);
+        let index_count: i64 = store.conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='injections_unused_window'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(index_count, 1);
+    }
+}
+
+#[test]
+fn optional_index_failure_does_not_prevent_opening() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    store
+        .conn
+        .execute_batch("DROP INDEX injections_unused_window; BEGIN IMMEDIATE;")
+        .unwrap();
+    let reopened = Store::open(dir.path()).unwrap();
+    assert_eq!(reopened.schema_version().unwrap(), 5);
+    assert!(reopened.unused_windows(1000001, 14).is_empty());
+    store.conn.execute_batch("ROLLBACK;").unwrap();
+    drop(reopened);
+    Store::open(dir.path()).unwrap();
+}

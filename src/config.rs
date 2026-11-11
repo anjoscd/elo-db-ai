@@ -155,6 +155,10 @@ pub struct Workspace {
     pub notes_budget_bytes: u64,
     /// Zero disables feedback demotion.
     pub demote_bad_min: u64,
+    /// Full deliveries without usage; zero disables automatic demotion.
+    pub demote_unused_min: u64,
+    /// Rolling window in days before retrying unused items.
+    pub demote_unused_days: u32,
     /// Maximum descendant projects activated by a parent cwd; zero disables it.
     pub parent_scope_max: usize,
 }
@@ -168,6 +172,8 @@ impl Default for Workspace {
             full_notes_max: 2,
             notes_budget_bytes: 1500,
             demote_bad_min: 3,
+            demote_unused_min: 6,
+            demote_unused_days: 14,
             parent_scope_max: 2,
         }
     }

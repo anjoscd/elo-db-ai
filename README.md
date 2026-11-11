@@ -37,7 +37,7 @@ Coding agents lose rules and decisions between conversations. Loading every memo
 - **Persistent memory:** stores `law`, `rule`, `decision`, `note` and `pitfall` items in SQLite, with keyword and path triggers, importance, history and scopes (`global`, `project:<name>`, `link:<name>`). Supports search, JSONL import, supersession, expiration and archival.
 - **Prompt context:** selects current items using scope, triggers and scores, with byte budgets, layer quotas, session deduplication and pointers to additional context. Notes and decisions have separate limits and default to pointers unless stronger signals justify their full text.
 - **Hooks at the point of work:** delivers prompt context, a session-start work summary and file-anchored rules before tool calls. Configurable guards can record matches or request confirmation/block a tool call.
-- **Local usefulness scoreboard:** records deliveries, bytes, manual feedback and automatic evidence from subsequent tool inputs that touch matching files or identifiers. This is a usage signal, not proof that a rule was followed or a task succeeded.
+- **Local usefulness scoreboard:** records deliveries, bytes, automatic evidence from subsequent tool inputs and responses, and agent reports of used or ignored items. Owner ratings are legacy records, not the usefulness measure. This is a usage signal, not proof that a rule was followed or a task succeeded.
 - **Code map:** incrementally indexes JavaScript and TypeScript (`.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`) with tree-sitter. Tracks entities, imports, calls, JSX rendering, callbacks and re-exports; queries callers, callees, importers and transitive impact. Reference reports distinguish resolved and unresolved results and report stale files.
 - **Work board:** tracks projects, tasks, dependencies, milestones and handoffs between conversations. Inactive open work can appear as deferred.
 - **Recipes and maintenance:** stores reusable procedures as triggered notes; proposes memory consolidation and applies supported changes with a backup.
@@ -142,7 +142,7 @@ args = ["mcp", "--root", "/path/to/workspace"]
 }
 ```
 
-Tools: `elo_recall` searches memories; `elo_context` reads a scope or topic; `elo_add` saves text (default kind `note`, scope `global`, optional `keywords` and `paths`); `elo_explain` explains an item; `elo_map` queries the code map; `elo_feedback` lets the agent report which delivered ids it used or ignored (shadow mode: recorded, never changes selection; only ids delivered in the same session are accepted); `elo_maintain_catalog` and `elo_maintain_propose` let the agent suggest maintenance (paths, always-on, scope, merges), validated and kept pending until you review it. Writes have agent origin, so laws are refused. Run `elo map sync` before map queries. Other MCP stdio clients use the same command and arguments; tool availability also depends on the client's MCP support.
+Tools: `elo_recall` searches memories; `elo_context` reads a scope or topic; `elo_add` saves text (default kind `note`, scope `global`, optional `keywords` and `paths`); `elo_explain` explains an item; `elo_map` queries the code map; `elo_feedback` lets the agent report which delivered ids it used or ignored (`used` prevents unused-item demotion during the configured window; only ids delivered in the same session are accepted); `elo_maintain_catalog` and `elo_maintain_propose` let the agent suggest maintenance (paths, always-on, scope, merges), validated and kept pending until you review it. Writes have agent origin, so laws are refused. Run `elo map sync` before map queries. Other MCP stdio clients use the same command and arguments; tool availability also depends on the client's MCP support.
 
 ### Claude Code hooks
 
@@ -278,7 +278,10 @@ Recipes require at least two steps and are stored as global notes. The commands 
 
 `elo maintain` shows a plan. `--apply` first backs up the store, then attempts valid duplicate supersessions, marks expired items and removes old or orphaned automatic usage rows. Similar decisions/notes are suggestions for manual review; duplicate laws are reported without automatic consolidation.
 
-`elo maintain review` lists proposals submitted by the agent through MCP. Each one was validated when submitted and is validated again before it is applied, inside a single transaction; only triggers or scope change, never titles or bodies. `elo shadow calibrate` reads the local shadow log, which records whether the selector would have stayed silent on each prompt, and shows, per score band, how often something was used and how often you marked it bad.
+`elo maintain review` lists proposals submitted by the agent through MCP. Each one was validated when submitted and is validated again before it is applied, inside a single transaction; only triggers or scope change, never titles or bodies. `elo shadow calibrate` reads the local shadow log, which records whether the selector would have stayed silent on each prompt, and shows, per score band, how often something was used and the proportion of agent reports marked `ignored` for items delivered in the same event (`n/a` without reports).
+
+In real prompts, decisions, rules and notes delivered in full in at least `[workspace] demote_unused_min = 6` distinct events over `demote_unused_days = 14` days become pointers if neither automatic usage nor agent `used` reports exist in that window. Laws are exempt; `0` for the minimum disables this policy. As full deliveries age out, items are tested again. `elo stats` and `elo explain <id>` expose this demotion. Owner ratings are not the usage measure; `demote_bad_min` remains a legacy setting. Benchmark fixtures retain their previous policy.
+
 
 ## Evaluation
 

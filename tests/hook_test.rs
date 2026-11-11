@@ -409,18 +409,22 @@ fn selector_calibration_matches_real_hook_injection_keys() {
         );
     }
     conn.execute_batch("INSERT INTO auto_usage SELECT DISTINCT session_id,event_seq,item_id,kind,scope,at FROM injections;
-        INSERT INTO feedback SELECT item_id,'bad',kind,scope,at+86400 FROM injections;").unwrap();
+        INSERT OR IGNORE INTO agent_feedback SELECT session_id,event_seq,item_id,'ignored',0,at FROM injections;").unwrap();
     let buckets = elo_ctx::shadow::calibrate(&conn, &records).unwrap();
     assert_eq!(buckets.iter().map(|b| b.events).sum::<usize>(), 4);
     assert_eq!(buckets.iter().map(|b| b.used).sum::<usize>(), 4);
-    assert_eq!(buckets.iter().map(|b| b.bad).sum::<usize>(), 4);
-    assert!(elo()
+    assert!(buckets.iter().map(|b| b.ignored).sum::<usize>() >= 4);
+    let output = elo()
         .args(["shadow", "calibrate"])
         .current_dir(&dir_path)
         .output()
-        .unwrap()
-        .status
-        .success());
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("top band | events | used | agent ignored"));
+    assert!(text.contains("100.0%"));
+    assert!(text.contains("n/a"));
+    assert!(!text.to_lowercase().contains("owner"));
 }
 
 #[test]

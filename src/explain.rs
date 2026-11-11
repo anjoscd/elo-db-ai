@@ -114,6 +114,14 @@ pub fn item_report(root: &Path, config: &Config, item: &Item) -> String {
         config.workspace.demote_bad_min
     );
     if let Ok(store) = crate::store::Store::open_read_only(root) {
+        let windows = store.unused_windows(
+            crate::store::now_seconds(),
+            config.workspace.demote_unused_days,
+        );
+        let window = windows.get(&item.id).cloned().unwrap_or_default();
+        let _ = writeln!(out, "demoted (unused): {} (full events={}, auto uses={}, agent used={}, window={} days, limit={})",
+            if window.demoted(item.kind, config.workspace.demote_unused_min) { "yes; pointer" } else { "no" },
+            window.full_events, window.auto_used, window.agent_used, config.workspace.demote_unused_days, config.workspace.demote_unused_min);
         if let Ok(mut statement) = store
             .conn
             .prepare("SELECT at FROM auto_usage WHERE item_id=?1 ORDER BY at")

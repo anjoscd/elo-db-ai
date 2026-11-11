@@ -168,6 +168,13 @@ CREATE TABLE IF NOT EXISTS proposals (
 CREATE INDEX IF NOT EXISTS proposals_pending ON proposals(applied_at, created_at);
 "#;
 
+// Cover full, demotable deliveries without reading injection rows from the table.
+const UNUSED_INDEX_SQL: &str = "
+CREATE INDEX IF NOT EXISTS injections_unused_window
+ON injections(mode, at, item_id, session_id, event_seq)
+WHERE kind IN ('decision','rule','note');
+";
+
 impl Store {
     /// Opens (creating when needed) `<root>/.elo/elo.db`.
     pub fn open(root: &Path) -> Result<Self, StoreError> {
@@ -188,6 +195,7 @@ impl Store {
             let conn = Connection::open(path)?;
             conn.busy_timeout(std::time::Duration::from_secs(5))?;
             if read_schema_version(&conn)? == Some(SCHEMA_VERSION) && feedback_index_valid(&conn)? {
+                ensure_optional_indexes(&conn);
                 return Ok(Self {
                     conn,
                     path: path.to_path_buf(),
@@ -216,6 +224,7 @@ impl Store {
             }
             None => initialize(&mut conn)?,
         }
+        ensure_optional_indexes(&conn);
         Ok(Self {
             conn,
             path: path.to_path_buf(),
@@ -472,6 +481,7 @@ fn initialize(conn: &mut Connection) -> Result<(), StoreError> {
     transaction.execute_batch(V5_SQL)?;
     write_version(&transaction)?;
     transaction.commit()?;
+    ensure_optional_indexes(conn);
     Ok(())
 }
 
@@ -492,6 +502,13 @@ fn migrate(conn: &mut Connection, from: i64) -> Result<(), StoreError> {
     write_version(&transaction)?;
     transaction.commit()?;
     Ok(())
+}
+
+// Optional acceleration must never delay opening behind a writer or reject a store.
+fn ensure_optional_indexes(conn: &Connection) {
+    let _ = conn.busy_timeout(std::time::Duration::ZERO);
+    let _ = conn.execute_batch(UNUSED_INDEX_SQL);
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
 }
 
 fn feedback_index_valid(conn: &Connection) -> Result<bool, StoreError> {

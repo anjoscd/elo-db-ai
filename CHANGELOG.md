@@ -4,7 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.2]
+
+### Changed
+
+- Real prompts demote unused decisions, rules, and notes to pointers after six events with full deliveries within 14 days, configurable through `demote_unused_min` and `demote_unused_days`. Automatic usage or a `used` report prevents demotion; laws are exempt, and the rolling window allows retries. Statistics and explanations show the reasons; benchmarks preserve the previous policy.
+- Recent notes and decisions no longer arrive in full on a single common word: they require a specific word (a digit or eight characters) or two keywords.
+- `elo shadow calibrate` replaces owner ratings with the `agent ignored` proportion among reports tied to items delivered in the same event, showing `n/a` when no reports exist.
+- A file being touched keeps its items in full even when they are demoted for disuse.
+- An optional index keeps the disuse lookup fast (about 34 ms p95 with 22,000 deliveries); it is created on open when missing, and the schema stays at version 5, so older builds keep working on the same store.
 
 ## [0.3.1]
 

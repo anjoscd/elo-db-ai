@@ -188,11 +188,11 @@ fn ratio(n: usize, total: usize) -> Option<f64> {
 pub struct Bucket {
     pub events: usize,
     pub used: usize,
-    pub bad: usize,
+    pub ignored: usize,
+    pub reported: usize,
 }
 
-/// Feedback has no event key: associate subsequent bad reports via injected items.
-/// Each event contributes at most once to each numerator.
+/// Usage per event and the proportion of ignored reports among delivered items.
 pub fn calibrate(
     conn: &rusqlite::Connection,
     records: &[Record],
@@ -219,9 +219,16 @@ pub fn calibrate(
             "SELECT r.bucket, COUNT(*),
              SUM(EXISTS(SELECT 1 FROM auto_usage u
                  WHERE u.session_id=r.session_id AND u.event_seq=r.event_seq)),
-             SUM(EXISTS(SELECT 1 FROM injections i JOIN feedback f ON f.item_id=i.item_id
-                 WHERE i.session_id=r.session_id AND i.event_seq=r.event_seq
-                 AND f.verdict='bad' AND f.at BETWEEN i.at AND i.at + 86400))
+             (SELECT COUNT(*) FROM agent_feedback f JOIN shadow_calibration c
+                 ON c.session_id=f.session_id AND c.event_seq=f.event_seq
+                 WHERE c.bucket=r.bucket AND f.verdict='ignored' AND EXISTS
+                 (SELECT 1 FROM injections i WHERE i.session_id=f.session_id
+                  AND i.event_seq=f.event_seq AND i.item_id=f.item_id)),
+             (SELECT COUNT(*) FROM agent_feedback f JOIN shadow_calibration c
+                 ON c.session_id=f.session_id AND c.event_seq=f.event_seq
+                 WHERE c.bucket=r.bucket AND EXISTS
+                 (SELECT 1 FROM injections i WHERE i.session_id=f.session_id
+                  AND i.event_seq=f.event_seq AND i.item_id=f.item_id))
              FROM shadow_calibration r GROUP BY r.bucket",
         )?;
         let rows = query.query_map([], |r| {
@@ -230,7 +237,8 @@ pub fn calibrate(
                 Bucket {
                     events: r.get(1)?,
                     used: r.get(2)?,
-                    bad: r.get(3)?,
+                    ignored: r.get(3)?,
+                    reported: r.get(4)?,
                 },
             ))
         })?;
@@ -388,23 +396,17 @@ mod tests {
     }
 
     #[test]
-    fn bad_feedback_only_counts_within_inclusive_24_hours() {
+    fn reports_require_the_item_to_be_delivered_in_the_same_event() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE auto_usage(session_id TEXT, event_seq INTEGER);
-            CREATE TABLE injections(session_id TEXT, event_seq INTEGER, item_id TEXT, at INTEGER);
-            CREATE TABLE feedback(item_id TEXT, verdict TEXT, at INTEGER);
-            INSERT INTO injections VALUES ('session',1,'a',100), ('session',2,'a',86501),
-                ('session',3,'b',100), ('session',4,'c',100), ('session',5,'d',100);
-            INSERT INTO feedback VALUES ('a','bad',86501), ('b','bad',100),
-                ('c','bad',86500), ('d','bad',99);",
-        )
-        .unwrap();
-        let rows: Vec<_> = (1..=5).map(|seq| sample(seq as f64 / 10.0, seq)).collect();
-        let buckets = calibrate(&conn, &rows).unwrap();
-        for (index, expected) in [(1, 0), (2, 1), (3, 1), (4, 1), (5, 0)] {
-            assert_eq!(buckets[index].bad, expected, "bucket {index}");
-        }
+        conn.execute_batch("CREATE TABLE auto_usage(session_id TEXT, event_seq INTEGER);
+            CREATE TABLE injections(session_id TEXT, event_seq INTEGER, item_id TEXT);
+            CREATE TABLE agent_feedback(session_id TEXT, event_seq INTEGER, item_id TEXT, verdict TEXT);
+            INSERT INTO injections VALUES ('session',1,'a'), ('session',1,'a'), ('session',1,'b');
+            INSERT INTO agent_feedback VALUES ('session',1,'a','ignored'), ('session',1,'b','used'),
+                ('session',2,'a','ignored'), ('other',1,'a','ignored'), ('session',1,'c','ignored');").unwrap();
+        let buckets = calibrate(&conn, &[sample(0.1, 1), sample(0.2, 2)]).unwrap();
+        assert_eq!((buckets[1].ignored, buckets[1].reported), (1, 2));
+        assert_eq!((buckets[2].ignored, buckets[2].reported), (0, 0));
     }
 
     #[test]
@@ -414,10 +416,10 @@ mod tests {
             "
             CREATE TABLE auto_usage(session_id TEXT, event_seq INTEGER);
             CREATE TABLE injections(session_id TEXT, event_seq INTEGER, item_id TEXT, at INTEGER);
-            CREATE TABLE feedback(item_id TEXT, verdict TEXT, at INTEGER);
+            CREATE TABLE agent_feedback(session_id TEXT, event_seq INTEGER, item_id TEXT, verdict TEXT);
             INSERT INTO auto_usage VALUES ('session', 2), ('session', 2), ('other', 3);
             INSERT INTO injections VALUES ('session', 2, 'a', 10), ('session', 3, 'b', 10);
-            INSERT INTO feedback VALUES ('a','bad',11), ('a','bad',12), ('b','bad',9), ('b','bad',86411);
+            INSERT INTO agent_feedback VALUES ('session',2,'a','ignored');
         ",
         )
         .unwrap();
@@ -431,11 +433,11 @@ mod tests {
         let buckets = calibrate(&conn, &rows).unwrap();
         assert_eq!(buckets[0].events, 1);
         assert_eq!(
-            (buckets[1].events, buckets[1].used, buckets[1].bad),
+            (buckets[1].events, buckets[1].used, buckets[1].ignored),
             (1, 1, 1)
         );
         assert_eq!(
-            (buckets[9].events, buckets[9].used, buckets[9].bad),
+            (buckets[9].events, buckets[9].used, buckets[9].ignored),
             (2, 0, 0)
         );
         let now = chrono::DateTime::parse_from_rfc3339(&rows[0].at)

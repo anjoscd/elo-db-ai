@@ -526,7 +526,7 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             let buckets = elo_ctx::shadow::calibrate(&store.conn, &records)
                 .map_err(elo_ctx::store::StoreError::from)?;
             let mut out = std::io::stdout().lock();
-            writeln!(out, "top band | events | used | owner bad")?;
+            writeln!(out, "top band | events | used | agent ignored")?;
             for (i, bucket) in buckets.iter().enumerate() {
                 let percent = |n: usize| {
                     if bucket.events == 0 {
@@ -542,10 +542,16 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
                     (i + 1) as f64 / 10.0,
                     bucket.events,
                     percent(bucket.used),
-                    percent(bucket.bad)
+                    if bucket.reported == 0 {
+                        "n/a".into()
+                    } else {
+                        format!(
+                            "{:.1}%",
+                            100.0 * bucket.ignored as f64 / bucket.reported as f64
+                        )
+                    }
                 )?;
             }
-            writeln!(out, "Owner bad: subsequent feedback on items injected in the event; feedback has no event key.")?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Stats { since, by } => run_stats(root, since, by),
@@ -747,6 +753,37 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
         )?;
     }
     writeln!(out, "demoted            {}", demoted)?;
+    let unused_count = if config.workspace.demote_unused_min == 0 {
+        0
+    } else {
+        let unused = store.unused_windows(
+            elo_ctx::store::now_seconds(),
+            config.workspace.demote_unused_days,
+        );
+        let mut statement = store
+            .conn
+            .prepare("SELECT id, kind FROM items WHERE status='active'")
+            .map_err(elo_ctx::store::StoreError::from)?;
+        let count = statement
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(elo_ctx::store::StoreError::from)?
+            .filter_map(Result::ok)
+            .filter(|(id, kind)| {
+                use elo_ctx::bench::fixture::Kind;
+                let kind = match kind.as_str() {
+                    "rule" => Kind::Rule,
+                    "decision" => Kind::Decision,
+                    "note" => Kind::Note,
+                    _ => return false,
+                };
+                unused
+                    .get(id)
+                    .is_some_and(|w| w.demoted(kind, config.workspace.demote_unused_min))
+            })
+            .count();
+        count
+    };
+    writeln!(out, "demoted (unused)   {}", unused_count)?;
     writeln!(out, "events             {}", st.events)?;
     writeln!(out, "items full         {}", st.full)?;
     writeln!(out, "items as pointer   {}", st.pointers)?;

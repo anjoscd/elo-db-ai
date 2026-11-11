@@ -179,8 +179,11 @@ Invariants, enforced in one transaction per write:
 - Importers default every item to `note` with `origin = import`, and flag text that looks like instructions to the agent ("ignore previous…", tool-call syntax) for review.
 - **(deferred)** §6.3 learned importance MUST NOT use signals the item itself can induce, such as the agent quoting it, and MUST NOT change laws.
 
-### 6.3 Feedback loop (deferred)
-Learned `importance` adjustments from user-confirmed usefulness. Off by default, and evaluated on the benchmark before it is enabled.
+### 6.3 Automatic usage in real prompts
+
+Usefulness relies on `auto_usage` (tools and responses) and `used`/`ignored` reports in `agent_feedback`. Asking the owner for ratings is out of scope. There is no learned adjustment of `importance`.
+
+Decisions, rules, and notes delivered in full in at least `demote_unused_min` distinct events (default 6) within the last `demote_unused_days` days (default 14), without automatic usage or a `used` report in that window, become pointers. Laws are never demoted for disuse, and a touched path keeps an item in full. A zero minimum disables the policy; full deliveries expiring from the window allow retries. The query is aggregated once per event; incompatible schemas do not demote items. Fixtures and events with nonempty `allowed_scopes` preserve the previous policy; `demote_bad_min` is legacy.
 
 ## 6.4 Calibrated confidence (after M1)
 
@@ -192,8 +195,8 @@ Learned `importance` adjustments from user-confirmed usefulness. Off by default,
 ## 6.5 Scoreboard (with M0)
 
 - ELO keeps local, append-only counters per session: events, items emitted (full, pointer), bytes, laws delivered, abstentions, and cross-project emissions (items whose scope came only through explicit naming or a link, kept as an audit trail).
-- **Usefulness signal:** an item counts as *used* when the user confirms it (`elo good <id>` / `elo bad <id>`), or when the agent's next tool action touches a file or symbol named in the item's triggers. Agent quoting alone never counts (§6.2).
-- `elo stats [--since date] [--by project|scope|kind]` prints the scoreboard. It shows used ÷ emitted, the bad-report rate, bytes per event, law delivery, and the trend between ELO versions.
+- **Usefulness signal:** automatic usage recorded by `record`/`record_response` in `auto_usage`, and agent reports in `agent_feedback`. `elo good`/`elo bad` remain legacy records and do not participate in the new unused-item demotion.
+- `elo stats [--since date] [--by project|scope|kind]` prints the scoreboard. It shows automatic usage, agent reports, bytes per event, law delivery and `demoted (unused)`. `elo explain <id>` reports full deliveries, automatic uses, agent `used` reports and the window. `elo shadow calibrate` reports `agent ignored` as ignored reports divided by all agent reports tied to delivered items in the same event (`n/a` without reports).
 - Scoreboard data is private to the workspace. Only aggregates that the user explicitly exports may leave it.
 
 ## 7. Code map (M3)
@@ -222,7 +225,7 @@ elo explain [event]            candidates, scores, relevant set, what was droppe
 elo doctor                     overlapping roots, oversized laws, generic triggers, store health
 elo bench                      evaluation harness
 elo stats [--since] [--by]     local scoreboard (§6.5)
-elo good|bad <id>              usefulness feedback for the scoreboard and calibration
+elo good|bad <id>              legacy owner ratings; not the current usage measure
 ```
 
 ## 10. Non-functional requirements

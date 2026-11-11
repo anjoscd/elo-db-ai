@@ -717,3 +717,91 @@ mod stats_query_tests {
         assert_eq!(st.repeated_pointers, Some(1.0));
     }
 }
+
+/// Rolling window summary; fixtures do not load these data.
+#[derive(Debug, Default, Clone)]
+pub struct UsageWindow {
+    pub full_events: u64,
+    pub auto_used: u64,
+    pub agent_used: u64,
+}
+
+impl UsageWindow {
+    pub fn demoted(&self, kind: crate::bench::fixture::Kind, minimum: u64) -> bool {
+        use crate::bench::fixture::Kind;
+        minimum > 0
+            && matches!(kind, Kind::Decision | Kind::Rule | Kind::Note)
+            && self.full_events >= minimum
+            && self.auto_used == 0
+            && self.agent_used == 0
+    }
+}
+
+const UNUSED_WINDOWS_SQL: &str = "WITH signals AS (
+                    SELECT item_id, COUNT(*) AS full_count,
+                        0 AS auto_count, 0 AS agent_count
+                    FROM (
+                        SELECT DISTINCT item_id, session_id, event_seq
+                        FROM injections WHERE mode='full'
+                            AND kind IN ('decision','rule','note') AND at >= ?1 AND at <= ?2
+                    ) GROUP BY item_id
+                    UNION ALL
+                    SELECT item_id, 0, COUNT(*), 0 FROM auto_usage
+                    WHERE at >= ?1 AND at <= ?2 GROUP BY item_id
+                    UNION ALL
+                    SELECT item_id, 0, 0, COUNT(*) FROM agent_feedback
+                    WHERE at >= ?1 AND at <= ?2 AND verdict='used' GROUP BY item_id
+                )
+                SELECT item_id, SUM(full_count), SUM(auto_count), SUM(agent_count)
+                FROM signals GROUP BY item_id";
+
+impl Store {
+    /// One aggregate query per event, without correlated queries per item.
+    /// Old or incomplete schemas leave all items without demotion.
+    pub fn unused_windows(&self, now: i64, days: u32) -> BTreeMap<String, UsageWindow> {
+        let query = || -> rusqlite::Result<BTreeMap<String, UsageWindow>> {
+            let mut statement = self.conn.prepare(UNUSED_WINDOWS_SQL)?;
+            let rows = statement
+                .query_map(
+                    rusqlite::params![now.saturating_sub(i64::from(days) * 86400), now],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            UsageWindow {
+                                full_events: row.get(1)?,
+                                auto_used: row.get(2)?,
+                                agent_used: row.get(3)?,
+                            },
+                        ))
+                    },
+                )?
+                .collect();
+            rows
+        };
+        query().unwrap_or_default()
+    }
+}
+
+#[test]
+fn unused_windows_plan_uses_indexed_time_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let plan = store
+        .conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {UNUSED_WINDOWS_SQL}"))
+        .unwrap()
+        .query_map([0, 1000001], |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let plan = plan.join("\n");
+    eprintln!("{plan}");
+    // SQLite versions differ in whether a partial index is labeled covering.
+    assert!(
+        plan.replace("USING COVERING INDEX", "USING INDEX")
+            .contains(
+                "SEARCH injections USING INDEX injections_unused_window (mode=? AND at>? AND at<?)"
+            ),
+        "{plan}"
+    );
+}
