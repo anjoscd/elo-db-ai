@@ -449,6 +449,27 @@ fn agent_feedback_tool_accepts_only_recent_deliveries() {
 #[test]
 fn end_to_end_hook_feedback_line_accepted_by_mcp() {
     let dir = workspace();
+    // The line only asks about items already delivered in the session, so the store needs one.
+    let added = Command::new(env!("CARGO_BIN_EXE_elo"))
+        .args([
+            "add",
+            "law",
+            "--as-user",
+            "--id",
+            "law-base",
+            "--scope",
+            "global",
+            "--title",
+            "Base",
+            "--body",
+            "Always preserve user data.",
+            "--triggers",
+            "help",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(added.status.success(), "{added:?}");
     let run_hook = || -> String {
         let mut child = Command::new(env!("CARGO_BIN_EXE_elo"))
             .args(["hook", "user-prompt-submit", "--live"])
