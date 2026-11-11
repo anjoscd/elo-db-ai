@@ -164,7 +164,7 @@ fn tool_definitions() -> Vec<Value> {
         tool("elo_maintain_catalog", "List up to 30 active memory items for maintenance, with cursor pagination.", json!({
             "cursor":{"type":"integer","default":0}
         }), &[]),
-        tool("elo_maintain_propose", "Submit maintenance operations to be reviewed before applying. Operations JSON array: {op: 'set_paths'|'drop_always'|'set_scope'|'merge', ...}.", json!({
+        tool("elo_maintain_propose", "Submit maintenance operations to be reviewed before applying. Operations JSON array: {op: 'set_paths'|'drop_always'|'set_scope'|'merge', ...}. set_paths globs must be relative and match at least one existing file; only a trailing * (prefix) is supported, e.g. dir/*.", json!({
             "operations":{"type":"string"}
         }), &["operations"]),
     ]

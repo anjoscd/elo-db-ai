@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1]
+
+### Fixed
+
+- `elo_maintain_propose` and `elo maintain review` now validate paths with the same rule used at delivery: a trailing `*` is a prefix of the whole relative path (`dir/*` matches files in any subfolder), anything else is an exact file. Directory globs were rejected in 0.3.0 even when files existed. `**` and `*` in the middle are refused with a clear message; files must be regular files inside the root (no symlink escape), and the search skips `node_modules`, `.git`, `target` and `dist`.
+
 ## [0.3.0]
 
 ### Added

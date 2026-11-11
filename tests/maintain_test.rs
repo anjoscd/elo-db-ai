@@ -561,6 +561,88 @@ fn glob_rejects_symlinks_escaping_root_and_bare_directories() {
     assert_eq!(rejected.len(), 4, "{rejected:?}");
 }
 
+#[cfg(unix)]
+#[test]
+fn glob_validation_follows_the_delivery_prefix_semantics() {
+    let (dir, mut store) = propose_workspace();
+    // `pkg` holds only subdirectories; the real files live deeper inside.
+    std::fs::create_dir_all(dir.path().join("pkg/deep")).unwrap();
+    std::fs::write(dir.path().join("pkg/deep/file.rs"), "fn f() {}\n").unwrap();
+    std::fs::create_dir(dir.path().join("pkg/empty_sub")).unwrap();
+    // A symlinked directory whose only files live outside the root.
+    let outside = TempDir::new().unwrap();
+    std::fs::write(outside.path().join("x.rs"), "fn x() {}\n").unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("pkg/linked")).unwrap();
+    // Build output is pruned from the prefix search.
+    std::fs::create_dir_all(dir.path().join("target/build")).unwrap();
+    std::fs::write(dir.path().join("target/build/out.rs"), "fn o() {}\n").unwrap();
+    std::fs::create_dir(dir.path().join("lonely")).unwrap();
+
+    let ops = vec![
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["pkg/*".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["pkg/deep/file.rs".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["pkg/**".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["pkg/deep/**".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["pkg/*/x".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["lonely/*".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["pkg/linked/*".into()],
+        },
+        ProposalOp::SetPaths {
+            id: "r1".into(),
+            globs: vec!["target/*".into()],
+        },
+    ];
+    let (accepted, rejected) = propose(dir.path(), &store, ops).unwrap();
+    // `pkg/*` counts files inside subdirectories; the exact path works too.
+    assert_eq!(accepted, vec!["r1", "r1"], "{accepted:?}");
+    assert_eq!(rejected.len(), 6, "{rejected:?}");
+    for (_, reason) in &rejected[..3] {
+        assert!(
+            reason == "only a trailing * (prefix) is supported, e.g. dir/*",
+            "{rejected:?}"
+        );
+    }
+    for (_, reason) in &rejected[3..] {
+        assert!(
+            reason.contains("did not match any existing file"),
+            "{rejected:?}"
+        );
+    }
+
+    // Review-time revalidation applies the same rule: once the only matching
+    // file goes away, the pending set_paths proposals are skipped, not applied.
+    std::fs::remove_file(dir.path().join("pkg/deep/file.rs")).unwrap();
+    let applied = apply_proposals(&mut store, &[], true, now_seconds()).unwrap();
+    assert!(applied.applied.is_empty(), "{applied:?}");
+    assert_eq!(applied.skipped.len(), 2, "{applied:?}");
+    for (_, reason) in &applied.skipped {
+        assert!(
+            reason.contains("did not match any existing file"),
+            "{applied:?}"
+        );
+    }
+}
+
 #[test]
 fn catalog_truncates_utf8_titles_by_char_and_aggregates_counts() {
     let dir = TempDir::new().unwrap();

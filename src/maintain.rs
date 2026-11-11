@@ -618,6 +618,13 @@ fn valid_scopes_conn(
     Ok(scopes)
 }
 
+/// Star positions other than a single trailing `*` cannot be expressed by the
+/// delivery matcher, so they are refused with this message.
+const GLOB_PREFIX_ONLY: &str = "only a trailing * (prefix) is supported, e.g. dir/*";
+
+/// Build/vendored directories the prefix search prunes so large workspaces stay fast.
+const SKIP_DIRS: [&str; 4] = ["node_modules", ".git", "target", "dist"];
+
 fn validate_glob(root: &Path, glob: &str) -> Result<(), String> {
     if glob.is_empty() {
         return Err("empty glob".into());
@@ -630,77 +637,98 @@ fn validate_glob(root: &Path, glob: &str) -> Result<(), String> {
     {
         return Err("glob must be relative and cannot contain '..'".into());
     }
-    if !glob_matches(root, glob) {
+    if glob.split('/').any(str::is_empty) {
+        return Err(format!("glob {glob:?} did not match any existing file"));
+    }
+    // Delivery (`path_matches`) understands only a single trailing `*`, a prefix of
+    // the whole relative path; anything without it must be an exact file path.
+    // Every other star position (`**`, mid-name) is refused before any fs access.
+    let prefix = match glob.strip_suffix('*') {
+        Some(prefix) if !prefix.contains('*') => prefix,
+        _ if glob.contains('*') => return Err(GLOB_PREFIX_ONLY.into()),
+        _ => glob,
+    };
+    let Ok(canon_root) = std::fs::canonicalize(root) else {
+        return Err(format!("glob {glob:?} did not match any existing file"));
+    };
+    let matched = if prefix != glob {
+        file_under_prefix(&canon_root, prefix)
+    } else {
+        exact_file_inside(&canon_root, glob)
+    };
+    if !matched {
         return Err(format!("glob {glob:?} did not match any existing file"));
     }
     Ok(())
 }
 
-fn glob_matches(root: &Path, pattern: &str) -> bool {
-    let Ok(canon_root) = std::fs::canonicalize(root) else {
+/// True when `root/glob` is an existing regular file (a directory or a symlink
+/// never counts) and stays inside the root.
+fn exact_file_inside(canon_root: &Path, glob: &str) -> bool {
+    let path = canon_root.join(glob);
+    let Ok(meta) = std::fs::symlink_metadata(&path) else {
         return false;
     };
-    let segments: Vec<&str> = pattern.split('/').collect();
-    if segments.iter().any(|s| s.is_empty()) {
+    if meta.file_type().is_symlink() || !meta.file_type().is_file() {
         return false;
     }
-    walk_matches(&canon_root, &canon_root, &segments)
+    let Ok(canon) = std::fs::canonicalize(&path) else {
+        return false;
+    };
+    canon.starts_with(canon_root)
 }
 
-fn walk_matches(canon_root: &Path, dir: &Path, segments: &[&str]) -> bool {
-    if segments.is_empty() {
-        return false;
-    }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    let head = segments[0];
-    let tail = &segments[1..];
-    for entry in entries.filter_map(Result::ok) {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !segment_matches(&name, head) {
+/// True when at least one regular file (never a symlink, never a directory
+/// alone) under `canon_root` has a relative path starting with `prefix`.
+/// Stops at the first such file; `SKIP_DIRS` are pruned along with any
+/// directory that cannot contain a relative path beginning with `prefix`.
+fn file_under_prefix(canonical_root: &Path, prefix: &str) -> bool {
+    let mut stack = vec![(canonical_root.to_path_buf(), String::new())];
+    while let Some((dir, rel)) = stack.pop() {
+        if !directory_may_hold_files(&rel, prefix) {
             continue;
         }
-        let path = entry.path();
-        let Ok(meta) = std::fs::symlink_metadata(&path) else {
-            continue;
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
         };
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        let Ok(canon) = std::fs::canonicalize(&path) else {
-            continue;
-        };
-        if !canon.starts_with(canon_root) {
-            continue;
-        }
-        if tail.is_empty() {
-            if meta.file_type().is_file() {
-                return true;
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            let kind = meta.file_type();
+            // Symlinks are skipped entirely, so nothing can leave the root.
+            if kind.is_symlink() {
+                continue;
             }
-        } else if meta.file_type().is_dir() && walk_matches(canon_root, &path, tail) {
-            return true;
+            let child_rel = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            if kind.is_file() {
+                if child_rel.starts_with(prefix) {
+                    return true;
+                }
+            } else if kind.is_dir()
+                && !SKIP_DIRS.iter().any(|skip| *skip == name)
+                && directory_may_hold_files(&child_rel, prefix)
+            {
+                stack.push((entry.path(), child_rel));
+            }
         }
     }
     false
 }
 
-fn segment_matches(name: &str, pattern: &str) -> bool {
-    if pattern == "*" {
+/// Whether a file stored in the directory at relative path `dir` (paths
+/// `dir/...`) can start with `prefix`.
+fn directory_may_hold_files(dir: &str, prefix: &str) -> bool {
+    if dir.is_empty() || prefix.is_empty() || dir.starts_with(prefix) {
         return true;
     }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return name.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return name.ends_with(suffix);
-    }
-    if let Some(mid) = pattern.split_once('*') {
-        return name.starts_with(mid.0) && name.ends_with(mid.1);
-    }
-    name == pattern
+    prefix.starts_with(dir) && prefix.as_bytes()[dir.len()] == b'/'
 }
 
 // ---------------------------------------------------------------------------
