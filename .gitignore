@@ -8,4 +8,3 @@
 # private benchmark data
 bench/private/
 .DS_Store
-.base-ast/
