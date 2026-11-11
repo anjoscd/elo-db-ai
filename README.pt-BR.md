@@ -142,7 +142,7 @@ args = ["mcp", "--root", "/path/to/workspace"]
 }
 ```
 
-Ferramentas: `elo_recall` busca memórias; `elo_context` lê um escopo ou assunto; `elo_add` grava texto (tipo padrão `note`, escopo `global`, `keywords` e `paths` opcionais); `elo_explain` explica um item; `elo_map` consulta o mapa de código. As gravações têm origem de agente, portanto leis são recusadas. Execute `elo map sync` antes de consultar o mapa. Outros clientes MCP stdio usam o mesmo comando e argumentos; a disponibilidade das ferramentas também depende do suporte MCP do cliente.
+Ferramentas: `elo_recall` busca memórias; `elo_context` lê um escopo ou assunto; `elo_add` grava texto (tipo padrão `note`, escopo `global`, `keywords` e `paths` opcionais); `elo_explain` explica um item; `elo_map` consulta o mapa de código; `elo_feedback` permite ao agente informar quais ids entregues ele usou ou ignorou (modo sombra: só registra, nunca muda a seleção; só aceita ids entregues na mesma sessão); `elo_maintain_catalog` e `elo_maintain_propose` permitem ao agente sugerir manutenção (caminhos, "sempre", escopo, junções), validada e pendente até você revisar. As gravações têm origem de agente, portanto leis são recusadas. Execute `elo map sync` antes de consultar o mapa. Outros clientes MCP stdio usam o mesmo comando e argumentos; a disponibilidade das ferramentas também depende do suporte MCP do cliente.
 
 ### Ganchos do Claude Code
 
@@ -268,11 +268,17 @@ elo recipe add "Verificar uma alteração" \
 elo recipe list
 elo maintain
 elo maintain --apply
+elo maintain review                  # propostas feitas pelo agente
+elo maintain review --apply 3,4      # aplica as escolhidas (lei só com id explícito)
+elo maintain review --apply-nonlaw   # aplica todas as pendentes, menos leis
+elo shadow calibrate                 # faixas de pontuação x uso observado, para calibrar a abstenção
 ```
 
 Receitas exigem pelo menos dois passos e são armazenadas como notas globais. As opções acima usam os nomes em inglês; os nomes anteriores em português continuam funcionando como aliases.
 
 `elo maintain` mostra um plano. `--apply` primeiro faz backup do banco, depois tenta substituições válidas de duplicados, marca itens expirados e remove registros automáticos de uso antigos ou órfãos. Decisões/notas semelhantes são sugestões para revisão manual; leis duplicadas são informadas sem consolidação automática.
+
+`elo maintain review` lista as propostas enviadas pelo agente via MCP. Cada uma foi validada no envio e é validada de novo antes de ser aplicada, numa única transação; só gatilhos ou escopo mudam, nunca título ou corpo. `elo shadow calibrate` lê o registro local da sombra, que anota se o seletor teria ficado em silêncio em cada pedido, e mostra, por faixa de pontuação, com que frequência algo foi usado e com que frequência você marcou como ruim.
 
 ## Avaliação
 

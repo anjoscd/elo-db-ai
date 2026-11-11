@@ -22,6 +22,12 @@ struct Cli {
     command: Command,
 }
 
+#[derive(Debug, Subcommand)]
+enum ShadowCommand {
+    /// Compare score bands with observed usage and subsequent owner feedback.
+    Calibrate,
+}
+
 // The placeholder subcommands already parse their arguments, but only later
 // tasks consume the values; keep the fields without a dead-code warning.
 #[allow(dead_code)]
@@ -43,6 +49,11 @@ enum RecipeCmd {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Inspect passive abstention telemetry.
+    Shadow {
+        #[command(subcommand)]
+        command: ShadowCommand,
+    },
     /// Serve MCP over stdin/stdout.
     Mcp {
         #[arg(long)]
@@ -190,6 +201,8 @@ enum Command {
     },
     /// Memory housekeeping: propose (default) or apply (--apply) consolidation.
     Maintain {
+        #[command(subcommand)]
+        cmd: Option<MaintainCmd>,
         /// Apply the plan (a full copy of the store is made first).
         #[arg(long = "apply", alias = "aplicar")]
         apply: bool,
@@ -251,6 +264,19 @@ enum Command {
 enum By {
     Kind,
     Scope,
+}
+
+#[derive(Debug, Subcommand)]
+enum MaintainCmd {
+    /// Review pending agent proposals.
+    Review {
+        /// Apply the listed proposal ids (comma separated). Laws are allowed when explicit.
+        #[arg(long = "apply", value_name = "IDS", value_delimiter = ',')]
+        apply: Option<Vec<String>>,
+        /// Apply all pending proposals except those touching laws.
+        #[arg(long = "apply-nonlaw")]
+        apply_nonlaw: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -492,6 +518,36 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Explain { id, last, session } => run_explain(root, id.as_deref(), last, session),
+        Command::Shadow {
+            command: ShadowCommand::Calibrate,
+        } => {
+            let store = elo_ctx::store::Store::open(root)?;
+            let records = elo_ctx::shadow::read(&elo_ctx::store::data_dir(root));
+            let buckets = elo_ctx::shadow::calibrate(&store.conn, &records)
+                .map_err(elo_ctx::store::StoreError::from)?;
+            let mut out = std::io::stdout().lock();
+            writeln!(out, "top band | events | used | owner bad")?;
+            for (i, bucket) in buckets.iter().enumerate() {
+                let percent = |n: usize| {
+                    if bucket.events == 0 {
+                        "n/a".into()
+                    } else {
+                        format!("{:.1}%", 100.0 * n as f64 / bucket.events as f64)
+                    }
+                };
+                writeln!(
+                    out,
+                    "{:.1}–{:.1} | {} | {} | {}",
+                    i as f64 / 10.0,
+                    (i + 1) as f64 / 10.0,
+                    bucket.events,
+                    percent(bucket.used),
+                    percent(bucket.bad)
+                )?;
+            }
+            writeln!(out, "Owner bad: subsequent feedback on items injected in the event; feedback has no event key.")?;
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Stats { since, by } => run_stats(root, since, by),
         Command::Recipe { cmd } => {
             let mut out = std::io::stdout().lock();
@@ -519,24 +575,30 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Maintain { apply } => {
-            let mut store = elo_ctx::store::Store::open(root)?;
-            let now = elo_ctx::store::now_seconds();
-            let plan = elo_ctx::maintain::plan(&store, now)
-                .map_err(|e| AppError::Internal(e.to_string()))?;
-            let applied = if apply {
-                Some(
-                    elo_ctx::maintain::apply(&mut store, &plan, now)
-                        .map_err(|e| AppError::Internal(e.to_string()))?,
-                )
-            } else {
-                None
-            };
-            std::io::stdout()
-                .lock()
-                .write_all(elo_ctx::maintain::report(&plan, applied.as_ref()).as_bytes())?;
-            Ok(ExitCode::SUCCESS)
-        }
+        Command::Maintain { cmd, apply } => match cmd.as_ref() {
+            Some(MaintainCmd::Review {
+                apply: ids,
+                apply_nonlaw,
+            }) => run_maintain_review(root, ids.as_deref(), *apply_nonlaw),
+            _ => {
+                let mut store = elo_ctx::store::Store::open(root)?;
+                let now = elo_ctx::store::now_seconds();
+                let plan = elo_ctx::maintain::plan(&store, now)
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                let applied = if apply {
+                    Some(
+                        elo_ctx::maintain::apply(&mut store, &plan, now)
+                            .map_err(|e| AppError::Internal(e.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+                std::io::stdout()
+                    .lock()
+                    .write_all(elo_ctx::maintain::report(&plan, applied.as_ref()).as_bytes())?;
+                Ok(ExitCode::SUCCESS)
+            }
+        },
         Command::Discover => run_discover(root),
         Command::Update { check, version } => {
             let current_exe =
@@ -669,6 +731,21 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
     let pct = |v: Option<f64>| v.map_or("n/a".to_string(), |x| format!("{:.1}%", x * 100.0));
     let num = |v: Option<u64>| v.map_or("n/a".to_string(), |x| x.to_string());
     let mut out = std::io::stdout().lock();
+    let records = elo_ctx::shadow::read(&elo_ctx::store::data_dir(root));
+    let (abstain, delivered, skipped) =
+        elo_ctx::shadow::percentages(&records, chrono::Utc::now().timestamp(), since);
+    writeln!(out, "shadow: would abstain {} of prompts", pct(abstain))?;
+    writeln!(
+        out,
+        "shadow: of those, {} delivered something full",
+        pct(delivered)
+    )?;
+    if skipped > 0 {
+        writeln!(
+            out,
+            "{skipped} shadow records skipped: invalid or future time"
+        )?;
+    }
     writeln!(out, "demoted            {}", demoted)?;
     writeln!(out, "events             {}", st.events)?;
     writeln!(out, "items full         {}", st.full)?;
@@ -680,9 +757,48 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
         num(st.bytes_p50),
         num(st.bytes_p95)
     )?;
+    writeln!(
+        out,
+        "pointers/event p50 / p95  {} / {}",
+        num(st.pointers_p50),
+        num(st.pointers_p95)
+    )?;
+    writeln!(
+        out,
+        "repeated pointers  {} (across compaction/session-start boundaries this may over-count)",
+        pct(st.repeated_pointers)
+    )?;
     writeln!(out, "feedback good/bad  {} / {}", st.good, st.bad)?;
     writeln!(out, "used (good/full)   {}", pct(st.used_rate()))?;
     writeln!(out, "bad-report rate    {}", pct(st.bad_rate()))?;
+    writeln!(
+        out,
+        "agent used/ignored {} / {}",
+        st.agent_used, st.agent_ignored
+    )?;
+    let corroborated_pct = if st.agent_used > 0 {
+        format!(
+            "{:.1}%",
+            st.agent_corroborated as f64 * 100.0 / st.agent_used as f64
+        )
+    } else {
+        "n/a".to_string()
+    };
+    writeln!(out, "agent corroborated {corroborated_pct}")?;
+    writeln!(out, "agent contradicted {}", st.agent_contradicted)?;
+    let concord = if st.agent_agree + st.agent_disagree > 0 {
+        format!(
+            "{:.1}%",
+            st.agent_agree as f64 * 100.0 / (st.agent_agree + st.agent_disagree) as f64
+        )
+    } else {
+        "n/a".to_string()
+    };
+    writeln!(
+        out,
+        "agent concordance  {concord} ({} agree / {} disagree)",
+        st.agent_agree, st.agent_disagree
+    )?;
     if !st.groups.is_empty() {
         writeln!(
             out,
@@ -699,6 +815,64 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
                 g.auto_used,
                 pct((g.full > 0).then(|| g.auto_used as f64 / g.full as f64))
             )?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_maintain_review(
+    root: &Path,
+    ids: Option<&[String]>,
+    apply_nonlaw: bool,
+) -> Result<ExitCode, AppError> {
+    let mut store = elo_ctx::store::Store::open(root)?;
+    // An id that does not parse is an operator typo: fail loudly instead of applying the rest.
+    let parsed_ids: Option<Vec<i64>> = match ids {
+        None => None,
+        Some(list) => Some(
+            list.iter()
+                .map(|s| {
+                    s.trim()
+                        .parse::<i64>()
+                        .map_err(|_| AppError::Usage(format!("invalid proposal id: {s:?}")))
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+    };
+    let proposals =
+        elo_ctx::maintain::list_proposals(&store).map_err(|e| AppError::Internal(e.to_string()))?;
+    if parsed_ids.is_none() && !apply_nonlaw {
+        let mut out = std::io::stdout().lock();
+        if proposals.is_empty() {
+            writeln!(out, "no pending proposals")?;
+        } else {
+            for p in proposals {
+                writeln!(
+                    out,
+                    "{} {} {} {}",
+                    p.id,
+                    p.op,
+                    p.item_id.as_deref().unwrap_or(""),
+                    p.payload
+                )?;
+            }
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    let now = elo_ctx::store::now_seconds();
+    let applied = elo_ctx::maintain::apply_proposals(
+        &mut store,
+        parsed_ids.as_deref().unwrap_or(&[]),
+        apply_nonlaw,
+        now,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "applied: {}", applied.applied.len())?;
+    if !applied.skipped.is_empty() {
+        writeln!(out, "skipped:")?;
+        for (id, reason) in &applied.skipped {
+            writeln!(out, "  {id}: {reason}")?;
         }
     }
     Ok(ExitCode::SUCCESS)

@@ -227,7 +227,7 @@ pub fn find_root(cwd: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn safe_id(id: &str) -> String {
+pub(crate) fn safe_id(id: &str) -> String {
     id.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -448,7 +448,6 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
     let session_file = sessions.join(format!("{}.json", safe_id(&input.session_id)));
     // One event at a time per session: read-modify-write of the session file is locked.
     let _guard = lock(&session_file.with_extension("lock")).map_err(|e| e.to_string())?;
-    let found = discovery(root);
     let cwd_path = PathBuf::from(&input.cwd);
     let mut session: Session = fs::read_to_string(&session_file)
         .ok()
@@ -469,6 +468,16 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
     } else {
         crate::usage::Touches::default()
     };
+    let file_path = input
+        .tool_input
+        .as_ref()
+        .and_then(|t| t.get("file_path").and_then(|p| p.as_str()));
+    if event_name == "pre-tool-use" && touches.paths.is_empty() && file_path.is_none() {
+        let text = serde_json::to_string(&session).map_err(|e| e.to_string())?;
+        atomic_write(&session_file, &text).map_err(|e| e.to_string())?;
+        return Ok(None);
+    }
+    let found = discovery(root);
     for path in &mut touches.paths {
         *path = relative(root, root, Path::new(path), &found.worktrees);
     }
@@ -500,10 +509,7 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
     }
     // The event keeps its old meaning: only the file the tool names (file_path).
     // The full list of touched paths serves only the automatic usefulness signal above.
-    let touched: Vec<String> = input
-        .tool_input
-        .as_ref()
-        .and_then(|t| t.get("file_path").and_then(|p| p.as_str()))
+    let touched: Vec<String> = file_path
         .map(|p| vec![relative(root, &cwd_path, Path::new(p), &found.worktrees)])
         .unwrap_or_default();
 
@@ -565,6 +571,21 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
             }
         }
     }
+    if event_name == "session-start" {
+        if let (Ok(config), Some(store)) =
+            (config_for(root, &found), open_for_hook(root).ok().flatten())
+        {
+            if config.maintain.auto_invite {
+                let now = crate::store::now_seconds();
+                if let Some(line) = crate::maintain::maybe_invite(&store, now).ok().flatten() {
+                    output = Some(match output {
+                        Some(block) => format!("{block}\n{line}"),
+                        None => line,
+                    });
+                }
+            }
+        }
+    }
     if event_name == "pre-tool-use" && !input.suppress_pre_context && !touches.paths.is_empty() {
         // Deliver the rules that cite the file the tool is about to touch (arXiv 2607.20972).
         if let Some(mut store) = open_for_hook(root)? {
@@ -610,9 +631,55 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
         };
         let mut items = load_items(&store).map_err(|e| e.to_string())?;
         items.retain(|item| deliverable(item, Utc::now()));
-        let fx = live_fixture(root, config, items);
-        let selection = E1.select(&fx, &ev, &mut session.state);
-        let rendered = render(&fx, &ev, &selection);
+        let fx = live_fixture(root, config.clone(), items);
+        let mut selection = E1.select(&fx, &ev, &mut session.state);
+        let seq = i64::try_from(session.seq).unwrap_or(i64::MAX);
+        if session.seq > 0
+            && config.feedback.ask_every > 0
+            && session.seq.is_multiple_of(config.feedback.ask_every)
+        {
+            let prior = prior_session_deliveries(&store, &input.session_id, seq, 40)?;
+            if !prior.is_empty() {
+                let mut delivered: Vec<String> = Vec::new();
+                for id in selection
+                    .full_ids
+                    .iter()
+                    .chain(&selection.pointer_ids)
+                    .chain(&prior)
+                {
+                    if !delivered.contains(id) {
+                        delivered.push(id.clone());
+                        if delivered.len() == 20 {
+                            break;
+                        }
+                    }
+                }
+                // The session id comes from the harness and is echoed into the envelope: only an
+                // opaque token (ASCII letters, digits, '-', '_', '.', ':' up to 128 chars) is
+                // allowed, so a hostile id can never break the line or close the envelope.
+                let sid_ok = !input.session_id.is_empty()
+                    && input.session_id.len() <= 128
+                    && input
+                        .session_id
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
+                if !delivered.is_empty() && sid_ok {
+                    let ids_text = delivered.join(", ");
+                    let sid = &input.session_id;
+                    selection.feedback_line = Some(format!(
+                        "Call elo_feedback(session_id:\"{sid}\", used:[...], ignored:[...]) for these delivered ids: [{ids_text}]."
+                    ));
+                }
+            }
+        }
+        let mut rendered = render(&fx, &ev, &selection);
+        if selection.feedback_line.is_some()
+            && rendered.len() > config.workspace.budget_bytes as usize
+        {
+            selection.feedback_line = None;
+            rendered = render(&fx, &ev, &selection);
+        }
+        selection.used_bytes = rendered.len();
         let ids: Vec<(&str, Mode)> = selection
             .full_ids
             .iter()
@@ -624,10 +691,10 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
                     .map(|i| (i.as_str(), Mode::Pointer)),
             )
             .collect();
-        let seq = i64::try_from(session.seq).unwrap_or(i64::MAX);
         store
             .record_injection(&input.session_id, seq, selection.used_bytes as u64, &ids)
             .map_err(|e| e.to_string())?;
+        crate::shadow::record(&crate::store::data_dir(root), &fx, &ev, &selection);
         let shadow = root.join(DATA_DIR).join("shadow");
         fs::create_dir_all(&shadow).map_err(|e| e.to_string())?;
         let record = serde_json::json!({
@@ -645,7 +712,7 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
             .open(shadow.join("log.jsonl"))
             .map_err(|e| e.to_string())?;
         writeln!(f, "{record}").map_err(|e| e.to_string())?;
-        session.state.record(&selection);
+        session.state.record(&ev, &selection);
         if !rendered.is_empty() {
             output = Some(match output {
                 Some(block) => format!("{block}\n{rendered}"),
@@ -694,6 +761,30 @@ fn recently_delivered(
         .prepare(
             "SELECT DISTINCT item_id FROM injections \
              WHERE session_id = ?1 AND event_seq >= ?2 AND event_seq < ?3 AND mode = 'full'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![session, lower, seq], |r| {
+            r.get::<_, String>(0)
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+/// Items delivered earlier in this session within the `window`-event feedback window (`[seq - (window - 1), seq - 1]`).
+fn prior_session_deliveries(
+    store: &Store,
+    session: &str,
+    seq: i64,
+    window: u64,
+) -> Result<Vec<String>, String> {
+    let lower = seq.saturating_sub(i64::try_from(window.saturating_sub(1)).unwrap_or(i64::MAX));
+    let mut stmt = store
+        .conn
+        .prepare(
+            "SELECT item_id, MAX(event_seq) AS last_seq FROM injections \
+             WHERE session_id = ?1 AND event_seq >= ?2 AND event_seq < ?3 \
+             GROUP BY item_id ORDER BY last_seq DESC, item_id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt

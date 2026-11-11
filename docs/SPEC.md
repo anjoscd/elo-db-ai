@@ -123,6 +123,9 @@ Ties break by `(kind priority: law > pitfall > rule > decision > note, updated_a
 - Laws are emitted first, do not count against layer quotas, and are part of `used`.
 - **Hard budget:** `used` MUST NEVER exceed `budget_bytes`. If a store was edited by hand and violates the law budget, ELO emits laws until `budget_bytes − reserve` and then a single overflow line naming the missing law ids. That event is a law-coverage failure, and `elo doctor` fails until the store is fixed.
 - **Laws and dedup:** a law already served in the session (§5) is not repeated in full. It is emitted as a one-line reminder `[law] L3 (in force)` until the next compaction. For coverage, a law counts as delivered if its body was served in full in the current session and compaction window (EVALUATION §2).
+- **Real-mode noise reduction:** in real mode (`allowed_scopes` empty), the one-line law reminder is also suppressed. A law already delivered in the current session/compaction window is not emitted at all until the next compaction, when it returns in full. This removes a large source of repeated pointer noise without changing benchmark behavior.
+- **Rule 3 — repeat window for all pointers:** any pointer (rule, decision, note, or index line) that was already pointed within the last 20 events is suppressed, unless the current prompt matches two or more of its distinct keywords. This applies to both in-focus and out-of-focus items and keeps the context from repeatedly advertising the same item.
+- **Rule 4 — hard pointer cap:** the total number of pointers per event is capped at 8 across all categories. The highest-scored candidates are kept; the rest are summarized in a single `+N more → elo context` line.
 
 ### 4.5 Quotas and pointers
 - After laws, each layer (project → link → global) fills up to its quota of the **remaining** budget with the highest-scoring relevant items, as full bodies.

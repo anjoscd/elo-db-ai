@@ -11,8 +11,8 @@ fn v4_store() -> TempDir {
 }
 
 #[test]
-fn schema_is_version_4() {
-    assert_eq!(SCHEMA_VERSION, 4);
+fn schema_is_version_5() {
+    assert_eq!(SCHEMA_VERSION, 5);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn hook_open_never_migrates_an_old_schema() {
     match Store::open_no_migrate(dir.path()) {
         Err(StoreError::MigrationPending {
             found: 3,
-            supported: 4,
+            supported: 5,
         }) => {}
         other => panic!("expected MigrationPending, got {:?}", other.map(|_| ())),
     }
@@ -104,7 +104,7 @@ fn busy_migration_lock_fails_fast_instead_of_hanging() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(version, "4");
+    assert_eq!(version, "5");
 }
 
 #[test]

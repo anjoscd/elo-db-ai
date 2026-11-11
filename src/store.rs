@@ -13,7 +13,7 @@ pub const DATA_DIR: &str = ".elo";
 pub const DB_FILE: &str = "elo.db";
 
 /// Schema version written by this build.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -141,6 +141,31 @@ CREATE TABLE IF NOT EXISTS auto_usage (
 );
 CREATE INDEX IF NOT EXISTS auto_usage_item ON auto_usage(item_id);
 CREATE INDEX IF NOT EXISTS injections_session_event ON injections(session_id, event_seq);
+"#;
+
+const V5_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_feedback (
+    session_id TEXT NOT NULL,
+    event_seq INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('used', 'ignored')),
+    corroborated INTEGER NOT NULL DEFAULT 0,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, event_seq, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS agent_feedback_item ON agent_feedback(item_id);
+
+CREATE TABLE IF NOT EXISTS proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    op TEXT NOT NULL,
+    item_id TEXT,
+    payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    applied_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS proposals_pending ON proposals(applied_at, created_at);
 "#;
 
 impl Store {
@@ -276,6 +301,25 @@ impl Store {
             .map_err(|_| StoreError::InvalidSchemaValue(value))
     }
 
+    /// Reads a value from the meta table, if it exists.
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError> {
+        self.conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    /// Writes a value to the meta table.
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
     /// Checks the version and every required table and FTS trigger.
     pub fn check_schema(&self) -> Result<(), StoreError> {
         let version = self.schema_version()?;
@@ -296,6 +340,10 @@ impl Store {
             ("index", "feedback_item_id"),
             ("index", "auto_usage_item"),
             ("index", "injections_session_event"),
+            ("table", "agent_feedback"),
+            ("table", "proposals"),
+            ("index", "agent_feedback_item"),
+            ("index", "proposals_pending"),
         ] {
             let exists: bool = self.conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
@@ -421,6 +469,7 @@ fn initialize(conn: &mut Connection) -> Result<(), StoreError> {
     transaction.execute_batch(V2_SQL)?;
     transaction.execute_batch(V3_SQL)?;
     transaction.execute_batch(V4_SQL)?;
+    transaction.execute_batch(V5_SQL)?;
     write_version(&transaction)?;
     transaction.commit()?;
     Ok(())
@@ -437,6 +486,9 @@ fn migrate(conn: &mut Connection, from: i64) -> Result<(), StoreError> {
         transaction.execute_batch(V3_SQL)?;
     }
     transaction.execute_batch(V4_SQL)?;
+    if from < 5 {
+        transaction.execute_batch(V5_SQL)?;
+    }
     write_version(&transaction)?;
     transaction.commit()?;
     Ok(())

@@ -72,7 +72,7 @@ pub fn measure(fx: &Fixture, split: Split) -> Report {
             state.begin_event(ev);
             let selection = selector.select(fx, ev, state);
             metrics.push(evaluate(fx, ev, &selection, state));
-            state.record(&selection);
+            state.record(ev, &selection);
         }
         selectors.push(SelectorReport {
             selector: selector.name().into(),

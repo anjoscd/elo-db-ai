@@ -176,7 +176,7 @@ fn note_budget_and_full_note_max_are_per_event() {
 }
 
 #[test]
-fn recency_uses_instants_and_served_items_stay_pointers() {
+fn recency_uses_instants_and_served_items_are_not_repeated_in_real_mode() {
     let mut a = note(0);
     a.updated_at = "2026-01-02T01:00:00+02:00".into();
     let mut b = note(1);
@@ -190,11 +190,11 @@ fn recency_uses_instants_and_served_items_stay_pointers() {
     let fx = live_fixture(Path::new("."), Config::default(), vec![a]);
     let mut state = SessionState::default();
     state.served.insert("n00".into());
-    assert_eq!(
-        E1.select(&fx, &event("revisor deploy"), &mut state)
-            .pointer_ids,
-        ["n00"]
-    );
+    // Real mode: an item already served in full is not pointed again in the same session.
+    assert!(E1
+        .select(&fx, &event("revisor deploy"), &mut state)
+        .pointer_ids
+        .is_empty());
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn tight_budgets_preserve_exact_law_rule_output_without_notes() {
 }
 
 #[test]
-fn note_recency_stays_within_layers_and_after_rule_pointers() {
+fn note_recency_stays_within_layers_and_rule_and_note_pointers_are_scored() {
     let mut c = Config::parse("[[project]]\nname='a'\nroot='a'\n[[project]]\nname='b'\nroot='b'\n[[link]]\nname='ab'\nprojects=['a','b']", Path::new("test")).unwrap();
     c.workspace.notes_budget_bytes = 0;
     let mut items: Vec<_> = (0..6).map(note).collect();
@@ -357,8 +357,9 @@ fn note_recency_stays_within_layers_and_after_rule_pointers() {
     let (s, _) = select(items, c, "a b revisor");
     assert_eq!(
         s.pointer_ids,
+        // Real mode: pointers are ranked by score (ties keep input order).
         // At most 5 note pointers (MAX_NOTE_POINTERS): the lowest scored note is cut.
-        ["n10", "n01", "n00", "n03", "n02", "n05"]
+        ["n01", "n00", "n03", "n02", "n10", "n05"]
     );
 }
 

@@ -12,11 +12,18 @@ pub struct E1;
 
 /// How many recent events keep a touched file's project active (SPEC §3.1, `touch_window`).
 const TOUCH_WINDOW: u64 = 20;
+/// Real mode only: an item pointed within this many events is not pointed again.
+const POINTER_REPEAT_WINDOW: u64 = 20;
+/// Real mode only: total pointer cap per event across all categories.
+const MAX_POINTERS: usize = 8;
 const HALF_LIFE_DAYS: f64 = 90.0;
 const W_PROXIMITY: f64 = 0.4;
 const W_RECENCY: f64 = 0.1;
 const W_IMPORTANCE: f64 = 0.2;
 const W_MATCH: f64 = 0.3;
+/// Cross-project keyword pointers are intentionally capped below otherwise
+/// equally-matched eligible items, so they never crowd out the project's own rules.
+const CROSS_MATCH_PENALTY: f64 = 0.7;
 
 /// Cap on note/decision pointers: past five, index lines crowd out the answer.
 const MAX_NOTE_POINTERS: usize = 5;
@@ -271,6 +278,151 @@ fn layer(item: &Item) -> usize {
 
 fn is_note(item: &Item) -> bool {
     matches!(item.kind, Kind::Note | Kind::Decision)
+}
+
+/// Count distinct keywords of `item` that appear in `text`.
+fn keyword_matches(item: &Item, text: &str) -> usize {
+    item.triggers
+        .keywords
+        .iter()
+        .map(|k| normalize(k))
+        .filter(|k| !k.is_empty() && has_word(text, k))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
+/// Real-mode check: has `item` been pointed recently enough to be considered a repeat?
+/// Exempt if the current prompt matches two or more distinct keywords of the item.
+fn is_repeated_pointer(item: &Item, ev: &Event, state: &SessionState, text: &str) -> bool {
+    if ev.allowed_scopes.is_empty() {
+        if let Some(&last) = state.pointed.get(&item.id) {
+            if ev.event_seq.saturating_sub(last) < POINTER_REPEAT_WINDOW
+                && keyword_matches(item, text) < 2
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Score for pointer candidates that did not go through the normal scoring pipeline
+/// (mainly cross-project keyword pointers). It uses the same [0, 1] scale as `scored`
+/// but deliberately keeps cross-project matches below an equally-matched eligible item.
+fn fallback_score(
+    item: &Item,
+    cross_matches: usize,
+    now: Option<DateTime<chrono::FixedOffset>>,
+) -> f64 {
+    let recency = match (now, DateTime::parse_from_rfc3339(&item.updated_at)) {
+        (Some(now), Ok(upd)) => {
+            let days = (now - upd).num_seconds().max(0) as f64 / 86_400.0;
+            0.5_f64.powf(days / HALF_LIFE_DAYS)
+        }
+        _ => 0.5,
+    };
+    let proximity = 0.2; // cross-project / out-of-focus behaves like global
+    let importance = item.importance.clamp(0.0, 1.0);
+    let match_strength = if cross_matches > 0 {
+        // Two matched keywords count as a full keyword match; cross-project is still
+        // capped below an eligible item with the same raw features.
+        (cross_matches as f64 / 2.0).min(1.0) * W_MATCH * CROSS_MATCH_PENALTY
+    } else {
+        0.0
+    };
+    W_PROXIMITY * proximity + W_RECENCY * recency + W_IMPORTANCE * importance + match_strength
+}
+
+/// Real-mode final pointer policy: remove already-served items, suppress repeats within
+/// `POINTER_REPEAT_WINDOW`, and cap the total to `MAX_POINTERS` while keeping the
+/// highest-scored candidates. Benchmark mode is left untouched.
+fn finalize_pointers(
+    fx: &Fixture,
+    selection: &mut Selection,
+    scored: &[(f64, &Item)],
+    cross: &[(&Item, usize)],
+    ev: &Event,
+    state: &SessionState,
+    text: &str,
+) {
+    if !ev.allowed_scopes.is_empty() {
+        return;
+    }
+    let score_of: BTreeMap<&str, f64> = scored.iter().map(|(s, i)| (i.id.as_str(), *s)).collect();
+    let cross_score_of: BTreeMap<&str, usize> = cross
+        .iter()
+        .map(|(item, matches)| (item.id.as_str(), *matches))
+        .collect();
+    // Build a lookup only for candidates we may need, not the whole workspace.
+    let mut candidate_items: BTreeMap<&str, &Item> = scored
+        .iter()
+        .map(|(_, i)| (i.id.as_str(), *i))
+        .chain(cross.iter().map(|(i, _)| (i.id.as_str(), *i)))
+        .collect();
+    // Fallback for ids that did not go through the scored/cross pipeline (e.g. image-only
+    // fallback rules). We only scan the store for the handful of missing ids.
+    for id in &selection.pointer_ids {
+        if !candidate_items.contains_key(id.as_str()) {
+            if let Some(item) = fx.items.iter().find(|i| i.id == *id) {
+                candidate_items.insert(item.id.as_str(), item);
+            }
+        }
+    }
+    let now = DateTime::parse_from_rfc3339(&ev.now).ok();
+    let mut candidates: Vec<(String, f64, usize)> = Vec::new();
+    for (order, id) in selection.pointer_ids.drain(..).enumerate() {
+        // Already delivered in full this session: do not point again.
+        if state.served.contains(&id) {
+            continue;
+        }
+        let item = match candidate_items.get(id.as_str()) {
+            Some(item) => *item,
+            None => {
+                // Unknown pointer ids (should not happen) are dropped rather than kept.
+                continue;
+            }
+        };
+        // Pointed recently? Exempt when the current prompt matches two or more keywords.
+        if is_repeated_pointer(item, ev, state, text) {
+            continue;
+        }
+        let score = score_of.get(id.as_str()).copied().unwrap_or_else(|| {
+            let matches = cross_score_of.get(id.as_str()).copied().unwrap_or(0);
+            fallback_score(item, matches, now)
+        });
+        candidates.push((id, score, order));
+    }
+    // Highest score first; ties keep the original order (stable by input index).
+    candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.2.cmp(&b.2)));
+    let kept = candidates
+        .iter()
+        .take(MAX_POINTERS)
+        .map(|(id, _, _)| id.clone())
+        .collect::<Vec<_>>();
+    let dropped = candidates.len().saturating_sub(kept.len());
+    selection.pointer_ids = kept;
+    selection.omitted_pointers = dropped;
+}
+
+/// Drop the lowest-ranked pointers until the final rendered output fits the budget.
+/// `used_bytes` is recalculated with `render`, so it always reflects the final state.
+fn trim_pointers_to_budget(fx: &Fixture, ev: &Event, selection: &mut Selection) {
+    let budget = fx.config.workspace.budget_bytes as usize;
+    selection.used_bytes = render(fx, ev, selection).len();
+    // Trim only in real mode. Benchmark mode must keep the legacy output byte-for-byte.
+    if !ev.allowed_scopes.is_empty() {
+        return;
+    }
+    while selection.used_bytes > budget && !selection.pointer_ids.is_empty() {
+        selection.pointer_ids.pop();
+        selection.omitted_pointers += 1;
+        selection.used_bytes = render(fx, ev, selection).len();
+    }
+    if selection.used_bytes > budget {
+        // The omission notice itself does not fit; prefer silence to a truncated envelope.
+        selection.omitted_pointers = 0;
+        selection.used_bytes = render(fx, ev, selection).len();
+    }
 }
 
 // Fit notes under both ceilings first; append a notice only if it still fits.
@@ -652,12 +804,16 @@ impl Selector for E1 {
             Selection::new(fx, ev, ids.to_vec(), ptr.to_vec()).used_bytes <= budget
         };
         // Laws first; a law already delivered this session is not repeated (SPEC §4.4).
+        // In real mode the one-line reminder is also dropped to avoid pointer noise; the
+        // law returns in full after the next compaction/session-start.
         laws.sort_by(|a, b| a.id.cmp(&b.id));
         let mut law_reminders: Vec<String> = Vec::new();
         for law in laws {
             if state.served.contains(&law.id) {
-                // SPEC §4.4: `[law] L3 (in force)` instead of the body again.
-                law_reminders.push(law.id.clone());
+                if !ev.allowed_scopes.is_empty() {
+                    // Benchmark mode keeps the legacy reminder line.
+                    law_reminders.push(law.id.clone());
+                }
                 continue;
             }
             let mut next = full.clone();
@@ -684,9 +840,17 @@ impl Selector for E1 {
                 .iter()
                 .filter(|(_, i)| layer(i) == idx && !is_note(i))
             {
-                if indexed.contains(&item.id) || state.served.contains(&item.id) {
-                    // Item outside the focus or already delivered: uses only the index line.
+                if indexed.contains(&item.id) {
+                    // Item outside the focus: uses only the index line.
                     pointers.push(item.id.clone());
+                    continue;
+                }
+                if state.served.contains(&item.id) {
+                    // Already delivered in full this session. Benchmark mode keeps the legacy
+                    // pointer; real mode drops it to reduce noise.
+                    if !ev.allowed_scopes.is_empty() {
+                        pointers.push(item.id.clone());
+                    }
                     continue;
                 }
                 let mut next = full.clone();
@@ -777,7 +941,7 @@ impl Selector for E1 {
         let mut cross_pointer_entries = cross_project_pointers;
         cross_pointer_entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.id.cmp(&b.0.id)));
         let mut inserted = 0;
-        for (item, _) in cross_pointer_entries {
+        for (item, _) in &cross_pointer_entries {
             if inserted >= 3 {
                 break;
             }
@@ -840,6 +1004,15 @@ impl Selector for E1 {
                 }
             }
         }
+        finalize_pointers(
+            fx,
+            &mut selection,
+            &scored,
+            &cross_pointer_entries,
+            ev,
+            state,
+            &text,
+        );
         if real_prompt && ev.prompt.is_some() && !text.trim().is_empty() {
             let mut end = text.len().min(400);
             while !text.is_char_boundary(end) {
@@ -849,7 +1022,20 @@ impl Selector for E1 {
             let excess = state.recent_prompts.len().saturating_sub(2);
             state.recent_prompts.drain(..excess);
         }
-        selection.used_bytes = render(fx, ev, &selection).len();
+        trim_pointers_to_budget(fx, ev, &mut selection);
+        if real_prompt && fx.config.shadow.enabled {
+            let mut candidates = scored.iter().filter(|(_, item)| item.kind != Kind::Law);
+            let best = candidates.next();
+            let top = best.map_or(0.0, |(score, _)| *score);
+            let second = candidates.next().map_or(0.0, |(score, _)| *score);
+            let matched_words = best.map_or(0, |(_, item)| keyword_matches(item, &matching_text));
+            selection.shadow = Some(crate::shadow::ShadowDecision::new(
+                top,
+                top - second,
+                matched_words,
+                fx.config.shadow.abstain_min_score,
+            ));
+        }
         selection
     }
 }
@@ -857,6 +1043,53 @@ impl Selector for E1 {
 #[cfg(test)]
 mod tests {
     use super::{has_word, prose, safe_relative, under};
+
+    #[test]
+    fn shadow_preserves_delivery_and_only_observes_real_prompts() {
+        let (mut fx, mut ev) = prompt_fixture();
+        let mut enabled = SessionState::default();
+        let mut disabled = enabled.clone();
+        for (seq, prompt) in ["zebra herd", "unrelated topic", "zebra", "zebra herd again"]
+            .iter()
+            .enumerate()
+        {
+            ev.event_seq = seq as u64;
+            ev.prompt = Some((*prompt).into());
+            fx.config.shadow.enabled = true;
+            let a = E1.select(&fx, &ev, &mut enabled);
+            assert!(a.shadow.is_some());
+            fx.config.shadow.enabled = false;
+            let b = E1.select(&fx, &ev, &mut disabled);
+            assert!(b.shadow.is_none());
+            assert_eq!(a.full_ids, b.full_ids);
+            assert_eq!(a.pointer_ids, b.pointer_ids);
+            assert_eq!(a.used_bytes, b.used_bytes);
+            assert_eq!(render(&fx, &ev, &a), render(&fx, &ev, &b));
+            enabled.record(&ev, &a);
+            disabled.record(&ev, &b);
+        }
+        fx.config.shadow.enabled = true;
+        fx.items.truncate(1);
+        fx.items[0].kind = Kind::Rule;
+        fx.items[0].importance = 1.0;
+        fx.items[0].triggers.always = true;
+        fx.items[0].updated_at = ev.now.clone();
+        let high = E1.select(&fx, &ev, &mut enabled).shadow.unwrap();
+        assert!(high.top >= 0.55);
+        assert!(!high.would_abstain);
+        fx.items.clear();
+        assert!(
+            E1.select(&fx, &ev, &mut enabled)
+                .shadow
+                .unwrap()
+                .would_abstain
+        );
+        ev.allowed_scopes.push("global".into());
+        assert!(E1.select(&fx, &ev, &mut enabled).shadow.is_none());
+        ev.allowed_scopes.clear();
+        ev.event_type = "session-start".into();
+        assert!(E1.select(&fx, &ev, &mut enabled).shadow.is_none());
+    }
 
     #[test]
     fn a_fence_opened_mid_line_hides_the_block() {
@@ -1149,7 +1382,9 @@ mod tests {
     }
 
     #[test]
-    fn rule_pointers_are_never_capped() {
+    fn rule_pointers_below_the_cap_survive_with_note_pointers() {
+        // With only two rule pointers in this fixture they survive alongside the best
+        // note pointers; the cap is not exercised here.
         let (fx, ev) = note_fixture(2, false);
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
         assert_eq!(note_pointers(&sel).len(), MAX_NOTE_POINTERS);
@@ -1158,10 +1393,356 @@ mod tests {
     }
 
     #[test]
+    fn real_mode_caps_total_pointers_at_eight_with_twelve_rules() {
+        // Enough rules to trigger the cap and force an omitted-pointers line.
+        // Notes are removed and the budget is tight so every rule becomes a pointer.
+        let (mut fx, mut ev) = note_fixture(12, false);
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.workspace.budget_bytes = 2_000;
+        fx.items.retain(|i| !is_note(i));
+        for item in &mut fx.items {
+            item.body = "b".repeat(3_000);
+        }
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(sel.pointer_ids.len(), MAX_POINTERS);
+        assert_eq!(sel.omitted_pointers, 4);
+        let out = render(&fx, &ev, &sel);
+        assert!(out.contains("+4 more → elo context"));
+        assert!(sel.used_bytes <= fx.config.workspace.budget_bytes as usize);
+    }
+
+    #[test]
     fn benchmark_mode_keeps_the_old_pointer_policy() {
         let (fx, ev) = note_fixture(0, true);
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
         assert_eq!(note_pointers(&sel).len(), 8);
+    }
+
+    #[test]
+    fn served_law_reminder_is_skipped_in_real_mode_and_returns_after_compaction() {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.config.workspace.budget_bytes = 10_000;
+        let mut law = fx.items[0].clone();
+        law.id = "L1".into();
+        law.kind = Kind::Law;
+        law.scope = "global".into();
+        law.body = "law body".into();
+        law.triggers.keywords = vec!["kw".into()];
+        law.triggers.paths.clear();
+        let mut rule = fx.items[0].clone();
+        rule.id = "R1".into();
+        rule.kind = Kind::Rule;
+        rule.scope = "global".into();
+        rule.body = "rule body".into();
+        rule.triggers.keywords = vec!["kw".into()];
+        rule.triggers.paths.clear();
+        fx.items = vec![law.clone(), rule];
+        ev.prompt = Some("kw".into());
+        let mut state = SessionState::default();
+        let sel1 = E1.select(&fx, &ev, &mut state);
+        assert!(sel1.full_ids.contains(&law.id));
+        state.record(&ev, &sel1);
+        ev.event_seq = 2;
+        let sel2 = E1.select(&fx, &ev, &mut state);
+        assert!(!sel2.full_ids.contains(&law.id));
+        assert!(!sel2.pointer_ids.contains(&law.id));
+        ev.event_type = "compaction".into();
+        state.begin_event(&ev);
+        ev.event_type = "user-prompt-submit".into();
+        ev.event_seq = 3;
+        let sel3 = E1.select(&fx, &ev, &mut state);
+        assert!(sel3.full_ids.contains(&law.id));
+    }
+
+    #[test]
+    fn served_full_rule_is_not_pointed_again_in_real_mode() {
+        let (mut fx, mut ev) = note_fixture(1, false);
+        fx.config.workspace.budget_bytes = 10_000;
+        let mut rule = fx
+            .items
+            .iter()
+            .find(|i| !is_note(i) && i.kind != Kind::Law)
+            .cloned()
+            .unwrap();
+        rule.body = "rule body".into();
+        rule.triggers.keywords = vec!["kw".into()];
+        fx.items.retain(|i| i.id == rule.id || is_note(i));
+        for item in fx.items.iter_mut() {
+            if !is_note(item) {
+                item.body = "rule body".into();
+                item.triggers.keywords = vec!["kw".into()];
+            }
+        }
+        ev.prompt = Some("kw".into());
+        let mut state = SessionState::default();
+        let sel1 = E1.select(&fx, &ev, &mut state);
+        assert!(sel1.full_ids.contains(&rule.id));
+        state.record(&ev, &sel1);
+        ev.event_seq = 2;
+        let sel2 = E1.select(&fx, &ev, &mut state);
+        assert!(!sel2.pointer_ids.contains(&rule.id));
+        assert!(!sel2.full_ids.contains(&rule.id));
+    }
+
+    #[test]
+    fn repeated_pointer_is_suppressed_within_window_except_on_two_keywords() {
+        let (mut fx, mut ev) = note_fixture(0, false);
+        // Keep the note as a pointer by giving it an oversized body and a tight budget.
+        fx.config.workspace.budget_bytes = 500;
+        fx.config.workspace.full_notes_max = 0;
+        let mut note = fx.items.iter().find(|i| is_note(i)).cloned().unwrap();
+        note.triggers.keywords = vec!["alpha".into(), "beta".into()];
+        note.body = "b".repeat(1000);
+        fx.items = vec![note.clone()];
+        ev.prompt = Some("alpha".into());
+        let mut state = SessionState::default();
+        let sel1 = E1.select(&fx, &ev, &mut state);
+        assert!(sel1.pointer_ids.contains(&note.id));
+        state.record(&ev, &sel1);
+        ev.event_seq = 2;
+        let sel2 = E1.select(&fx, &ev, &mut state);
+        assert!(!sel2.pointer_ids.contains(&note.id));
+        ev.prompt = Some("alpha beta".into());
+        let sel3 = E1.select(&fx, &ev, &mut state);
+        assert!(sel3.pointer_ids.contains(&note.id));
+        state.record(&ev, &sel3);
+        ev.prompt = Some("alpha".into());
+        ev.event_seq = 22;
+        let sel4 = E1.select(&fx, &ev, &mut state);
+        assert!(sel4.pointer_ids.contains(&note.id));
+    }
+
+    #[test]
+    fn real_mode_caps_total_pointers_at_eight_and_shows_omitted_line() {
+        let (mut fx, mut ev) = note_fixture(1, false);
+        // Small budget forces every rule into a pointer; 30 rules become 8 kept + 22 omitted.
+        fx.config.workspace.budget_bytes = 2_000;
+        fx.config.workspace.notes_budget_bytes = 0;
+        let base = fx
+            .items
+            .iter()
+            .find(|i| !is_note(i) && i.kind != Kind::Law)
+            .cloned()
+            .unwrap();
+        fx.items = (0..30)
+            .map(|n| {
+                let mut it = base.clone();
+                it.id = format!("rule-{n:02}");
+                it.kind = Kind::Rule;
+                it.scope = "global".into();
+                it.triggers.keywords = vec!["zebra".into()];
+                it.triggers.paths.clear();
+                it.body = "b".repeat(3_000);
+                it
+            })
+            .collect();
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(sel.pointer_ids.len(), MAX_POINTERS);
+        assert_eq!(sel.omitted_pointers, 22);
+        let out = render(&fx, &ev, &sel);
+        assert!(out.contains("+22 more → elo context"));
+    }
+
+    #[test]
+    fn candidate_items_follows_score_order_not_alphabetical() {
+        // Regression for the zip bug: score_of.keys() is alphabetical while scored is by
+        // score. Two candidates with different scores and ids out of alphabetical order:
+        // the higher-scored one was pointed 5 events ago and must be suppressed, the
+        // never-pointed one must appear. The old zip mapped ids to the wrong items.
+        let (mut fx, mut ev) = note_fixture(0, false);
+        fx.config.workspace.budget_bytes = 500;
+        fx.config.workspace.full_notes_max = 0;
+        let mut high = fx.items.iter().find(|i| is_note(i)).cloned().unwrap();
+        high.id = "z-high".into(); // alphabetically after the other item
+        high.triggers.keywords = vec!["alpha".into()];
+        high.importance = 0.9;
+        high.body = "b".repeat(1_000);
+        let mut low = high.clone();
+        low.id = "a-low".into();
+        low.importance = 0.5;
+        low.updated_at = "2025-01-01T00:00:00Z".into();
+        fx.items = vec![high, low];
+        ev.prompt = Some("alpha".into());
+        let mut state = SessionState::default();
+        state.pointed.insert("z-high".into(), 1);
+        ev.event_seq = 6;
+        let sel2 = E1.select(&fx, &ev, &mut state);
+        assert!(!sel2.pointer_ids.contains(&"z-high".to_string()));
+        assert!(sel2.pointer_ids.contains(&"a-low".to_string()));
+    }
+
+    #[test]
+    fn real_mode_trim_pops_pointers_and_respects_budget() {
+        // Force at least one pop: many pointers, tiny budget.
+        let (mut fx, mut ev) = note_fixture(12, false);
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.workspace.budget_bytes = 1_400;
+        fx.items.retain(|i| !is_note(i));
+        for item in &mut fx.items {
+            item.body = "b".repeat(3_000);
+        }
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.used_bytes <= fx.config.workspace.budget_bytes as usize);
+        assert!(sel.omitted_pointers >= 1);
+        let out = render(&fx, &ev, &sel);
+        assert!(out.contains("more → elo context"));
+    }
+
+    #[test]
+    fn real_mode_trim_zeros_omitted_when_notice_does_not_fit() {
+        // Tight budget where even the omission notice would overflow, so the trim
+        // prefers silence (omitted_pointers = 0) and still respects the hard budget.
+        let (mut fx, mut ev) = note_fixture(2, false);
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.workspace.budget_bytes = 1_350;
+        fx.items.retain(|i| !is_note(i));
+        for item in &mut fx.items {
+            item.body = "b".repeat(3_000);
+        }
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.used_bytes <= fx.config.workspace.budget_bytes as usize);
+        assert_eq!(sel.omitted_pointers, 0);
+    }
+
+    #[test]
+    fn benchmark_mode_does_not_trim_or_emit_omission_line() {
+        // Benchmark must keep the legacy output, so trim is a no-op even when the
+        // budget is exceeded.
+        let (mut fx, mut ev) = note_fixture(12, true);
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.workspace.budget_bytes = 1_500;
+        fx.items.retain(|i| !is_note(i));
+        for item in &mut fx.items {
+            item.body = "b".repeat(3_000);
+        }
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(sel.omitted_pointers, 0);
+        let out = render(&fx, &ev, &sel);
+        assert!(!out.contains("more → elo context"));
+    }
+
+    #[test]
+    fn cross_project_pointers_rank_below_eligible_project_rules() {
+        // Nine eligible project rules plus one cross-project pointer, each with two
+        // keyword matches. The cross-project item scores lower than otherwise equally
+        // matched eligible rules and is the one dropped by the cap.
+        let (mut fx, mut ev) = note_fixture(1, false);
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.workspace.budget_bytes = 2_000;
+        let base = fx
+            .items
+            .iter()
+            .find(|i| !is_note(i) && i.kind != Kind::Law)
+            .cloned()
+            .unwrap();
+        let mut words: Vec<String> = Vec::new();
+        fx.items = (0..9)
+            .map(|n| {
+                let a = format!("kw{n}a");
+                let b = format!("kw{n}b");
+                let mut it = base.clone();
+                it.id = format!("proj-{n}");
+                it.kind = Kind::Rule;
+                it.scope = "global".into();
+                it.triggers.keywords = vec![a.clone(), b.clone()];
+                it.triggers.paths.clear();
+                it.body = "b".repeat(3_000);
+                it
+            })
+            .collect();
+        for n in 0..9 {
+            words.push(format!("kw{n}a"));
+            words.push(format!("kw{n}b"));
+        }
+        let mut cross = base.clone();
+        cross.id = "cross-1".into();
+        cross.kind = Kind::Rule;
+        cross.scope = "project:other".into();
+        cross.triggers.keywords = vec!["zebra".into(), "herd".into()];
+        cross.triggers.paths.clear();
+        cross.body = "b".repeat(3_000);
+        fx.items.push(cross);
+        words.extend(["zebra".into(), "herd".into()]);
+        ev.prompt = Some(words.join(" "));
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(sel.pointer_ids.len(), MAX_POINTERS);
+        // The cross-project pointer is the lowest-ranked and is dropped.
+        assert!(!sel.pointer_ids.contains(&"cross-1".to_string()));
+        assert_eq!(sel.omitted_pointers, 2);
+    }
+
+    #[test]
+    fn final_render_fits_budget_and_recalculates_used_bytes() {
+        // Tight budget where the omitted-pointers line itself would push us over.
+        let (mut fx, mut ev) = note_fixture(12, false);
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.workspace.budget_bytes = 1_500;
+        let base = fx
+            .items
+            .iter()
+            .find(|i| !is_note(i) && i.kind != Kind::Law)
+            .cloned()
+            .unwrap();
+        let mut items = Vec::new();
+        for n in 0..12 {
+            let mut it = base.clone();
+            it.id = format!("rule-{n:02}");
+            it.kind = Kind::Rule;
+            it.scope = "global".into();
+            it.triggers.keywords = vec!["zebra".into()];
+            it.triggers.paths.clear();
+            it.body = "b".repeat(3_000);
+            items.push(it);
+        }
+        fx.items = items;
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.used_bytes <= fx.config.workspace.budget_bytes as usize);
+        assert!(sel.used_bytes == render(&fx, &ev, &sel).len());
+    }
+
+    #[test]
+    fn benchmark_mode_keeps_legacy_served_law_reminder_and_served_pointer() {
+        // Served law still emits the one-line legacy reminder in benchmark mode, and a
+        // served item still becomes a pointer.
+        let (mut fx, mut ev) = note_fixture(1, true);
+        fx.config.workspace.budget_bytes = 10_000;
+        let mut law = fx.items[0].clone();
+        law.id = "L1".into();
+        law.kind = Kind::Law;
+        law.scope = "global".into();
+        law.body = "law body".into();
+        law.triggers.keywords = vec!["kw".into()];
+        law.triggers.paths.clear();
+        let mut rule = fx.items[0].clone();
+        rule.id = "R1".into();
+        rule.kind = Kind::Rule;
+        rule.scope = "global".into();
+        rule.body = "rule body".into();
+        rule.triggers.keywords = vec!["kw".into()];
+        rule.triggers.paths.clear();
+        fx.items = vec![law.clone(), rule];
+        ev.prompt = Some("kw".into());
+        let mut state = SessionState::default();
+        let sel1 = E1.select(&fx, &ev, &mut state);
+        assert!(sel1.full_ids.contains(&law.id));
+        state.record(&ev, &sel1);
+        ev.event_seq = 2;
+        let sel2 = E1.select(&fx, &ev, &mut state);
+        let out = render(&fx, &ev, &sel2);
+        assert!(out.contains("[law] L1 (in force)") || out.contains("L1"));
+        assert!(sel2.pointer_ids.contains(&"R1".to_string()));
+    }
+
+    #[test]
+    fn old_session_state_without_pointed_loads() {
+        let state: SessionState = serde_json::from_str(r#"{"served":[],"touched":[]}"#).unwrap();
+        assert!(state.pointed.is_empty());
     }
 
     /// `ages` (hours before `ev.now`) become decisions `dec-0..` on the common word "widget".

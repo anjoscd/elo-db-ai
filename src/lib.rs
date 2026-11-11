@@ -32,3 +32,5 @@ pub mod usage;
 pub mod adapt;
 pub mod export;
 pub mod setup;
+
+pub mod shadow;

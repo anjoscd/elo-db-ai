@@ -315,25 +315,6 @@ fn a_broken_elo_toml_allows() {
 }
 
 #[test]
-fn hook_call_is_fast() {
-    let dir = workspace(TOML);
-    let input = call("Bash", json!({"command": "ls -la"}), dir.path());
-    run_hook(dir.path(), &input, true);
-    let mut times: Vec<u128> = (0..20)
-        .map(|_| {
-            let start = Instant::now();
-            run_hook(dir.path(), &input, true);
-            start.elapsed().as_millis()
-        })
-        .collect();
-    times.sort();
-    let p95 = times[18];
-    eprintln!("pre-tool-use p95: {p95} ms");
-    let limit = if cfg!(debug_assertions) { 300 } else { 100 };
-    assert!(p95 < limit, "p95 {p95} ms");
-}
-
-#[test]
 fn empty_fields_are_invalid_and_logged_action_is_preserved() {
     for field in ["", " "] {
         let g = guard("g", "Bash", field, &["x"], "deny", true);

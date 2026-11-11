@@ -156,6 +156,17 @@ fn tool_definitions() -> Vec<Value> {
         tool("elo_map", "Query the existing map; run elo map sync to index. Impact uses depth 3. For file and imports, value must be a path relative to the workspace root, without parent components or symlinks escaping the root.", json!({
             "mode":{"type":"string","enum":["file","contains","calls","imports","impact"]},"value":string
         }), &["mode","value"]),
+        tool("elo_feedback", "Report which injected items were useful or ignored. Only ids actually delivered in this session are accepted.", json!({
+            "session_id":{"type":"string"},
+            "used":{"type":"array","items":{"type":"string"}},
+            "ignored":{"type":"array","items":{"type":"string"}}
+        }), &["session_id"]),
+        tool("elo_maintain_catalog", "List up to 30 active memory items for maintenance, with cursor pagination.", json!({
+            "cursor":{"type":"integer","default":0}
+        }), &[]),
+        tool("elo_maintain_propose", "Submit maintenance operations to be reviewed before applying. Operations JSON array: {op: 'set_paths'|'drop_always'|'set_scope'|'merge', ...}.", json!({
+            "operations":{"type":"string"}
+        }), &["operations"]),
     ]
 }
 
@@ -290,6 +301,60 @@ fn call_tool(root: &Path, name: &str, args: &Value) -> Result<String, Box<dyn st
                 _ => unreachable!("mode validated by schema"),
             }
             Ok(String::from_utf8(out)?)
+        }
+        "elo_feedback" => {
+            // MCP does not authenticate the session_id; the worst case of a forged
+            // session_id is recording shadow-mode feedback for another session's
+            // delivered items, which never influences item selection.
+            let session_id = text("session_id");
+            let extract_strings = |key: &str| -> Vec<String> {
+                args[key]
+                    .as_array()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let used = extract_strings("used");
+            let ignored = extract_strings("ignored");
+            let store = Store::open(root)?;
+            let (accepted, rejected) = if !session_id.is_empty() {
+                store.record_agent_feedback(session_id, &used, &ignored, 40)?
+            } else {
+                let mut rej = used;
+                rej.extend(ignored);
+                (Vec::new(), rej)
+            };
+            Ok(format!(
+                "accepted: {}; rejected: {}",
+                accepted.join(", "),
+                rejected.join(", ")
+            ))
+        }
+        "elo_maintain_catalog" => {
+            let store = Store::open_read_only(root)?;
+            let cursor = args["cursor"].as_i64().unwrap_or(0);
+            Ok(crate::maintain::catalog(&store, cursor)?)
+        }
+        "elo_maintain_propose" => {
+            let operations = text("operations");
+            let parsed: Vec<crate::maintain::ProposalOp> =
+                serde_json::from_str(operations).map_err(|e| e.to_string())?;
+            // Proposals are stored even before they are applied: this needs a write.
+            let store = Store::open(root)?;
+            let (accepted, rejected) = crate::maintain::propose(root, &store, parsed)?;
+            let mut lines = vec![format!("accepted: {}", accepted.join(", "))];
+            if !rejected.is_empty() {
+                lines.push("rejected:".to_string());
+                for (id, reason) in rejected {
+                    lines.push(format!("  {id}: {reason}"));
+                }
+            }
+            Ok(lines.join("\n"))
         }
         _ => Err(format!("Unknown tool: {name}").into()),
     }

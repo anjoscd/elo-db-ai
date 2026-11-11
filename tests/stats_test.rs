@@ -135,6 +135,54 @@ fn version_one_store_migrates_to_current_with_a_backup() {
 }
 
 #[test]
+fn version_four_store_migrates_to_five_with_a_backup() {
+    let dir = TempDir::new().expect("tmp");
+    let path = dir.path().join("elo.db");
+    drop(store_with_items(&dir));
+    {
+        // Downgrade to a faithful v4 file: drop the v5 objects and rewrite the version.
+        let conn = Connection::open(&path).expect("raw open");
+        conn.execute_batch(
+            "DROP INDEX agent_feedback_item; DROP TABLE agent_feedback;
+             DROP INDEX proposals_pending; DROP TABLE proposals;
+             UPDATE meta SET value = '4' WHERE key = 'schema_version';",
+        )
+        .expect("downgrade");
+    }
+    let mut store = Store::open_at(&path).expect("migrates");
+    assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
+    store.check_schema().expect("current schema complete");
+    // The v5 objects exist and are usable right after the migration.
+    store
+        .record_injection("s1", 1, 10, &[("L1", Mode::Full)])
+        .expect("record");
+    let (accepted, rejected) = store
+        .record_agent_feedback("s1", &["L1".into()], &[], 40)
+        .expect("feedback");
+    assert_eq!(accepted, vec!["L1".to_string()]);
+    assert!(rejected.is_empty());
+    let backups: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("list")
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("backup-v4-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "one v4 backup");
+    let old = Connection::open(backups[0].path()).expect("backup opens");
+    let items: i64 = old
+        .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(items, 3, "backup keeps the v4 data");
+    let has_feedback_table: bool = old
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='agent_feedback')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!has_feedback_table, "the backup predates v5");
+}
+
+#[test]
 fn feedback_history_survives_item_deletion() {
     let dir = TempDir::new().expect("tmp");
     let store = store_with_items(&dir);

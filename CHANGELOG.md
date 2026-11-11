@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+
+- Shadow abstention telemetry: on each prompt the selector records, without changing what is delivered, whether it would have stayed silent (top score, gap, matched words). Stored locally in `.elo/shadow/selector.jsonl` without prompt text or titles, rotated at 5 MB. `elo stats` shows the would-abstain rate and `elo shadow calibrate` compares score bands with observed usage and owner feedback, so the threshold can be chosen from data before any gate is enabled.
+- Agent self-report, in shadow mode: every `[feedback] ask_every` prompts (default 5, `0` disables) the envelope asks the agent to call the new MCP tool `elo_feedback` with the ids it used or ignored. Only ids actually delivered in the same session within the last 40 events are accepted; reports are stored apart from the owner's `good`/`bad`, cross-checked against objective usage signals (`corroborated` / `contradicted` in `elo stats`) and do not change selection.
+- Agent-proposed maintenance: MCP tools `elo_maintain_catalog` (compact catalog, 30 items per page, prioritising always-on, never-delivered and never-used items) and `elo_maintain_propose` (`set_paths`, `drop_always`, `set_scope`, `merge`). Every operation is validated before it is accepted (globs relative to the root, matching real files, no symlink escape; known scopes; merges only within the same kind and scope and never for laws) and stored as a pending proposal. Nothing is applied until `elo maintain review --apply <ids>` or `--apply-nonlaw`; laws need an explicit id. Proposals are revalidated and applied atomically, and only triggers or scope change, never titles or bodies. An idle-cycle invitation appears at session start after 24 hours and five sessions (`[maintain] auto_invite`).
+- `elo stats` reports pointers per event (p50/p95) and the share of repeated pointers.
+
+### Changed
+
+- Much less noise per prompt in live mode: a law already delivered in the session is no longer repeated as a reminder (it returns in full after compaction), an item already delivered in full is not pointed again, a pointer is not repeated within 20 events unless the current prompt matches two of its keywords, and at most 8 pointers are sent per event, the rest summarised in one short line. Measured on real use: pointers per prompt went from 13/40 (p50/p95) to 1/4 and the median envelope from 1,096 to 275 bytes. Benchmark mode is unchanged.
+- Store schema 5 (migrated automatically from 4, with a backup).
+- The hook latency test runs in its own test binary.
+
 ## [0.2.0]
 
 ### Added

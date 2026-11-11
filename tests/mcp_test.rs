@@ -135,13 +135,16 @@ fn handshake_tools_and_persistent_agent_memory() {
     }
     let list = session.request(json!(2), "tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 8);
     for name in [
         "elo_recall",
         "elo_context",
         "elo_add",
         "elo_explain",
         "elo_map",
+        "elo_feedback",
+        "elo_maintain_catalog",
+        "elo_maintain_propose",
     ] {
         let tool = tools.iter().find(|t| t["name"] == name).unwrap();
         assert_eq!(tool["inputSchema"]["type"], "object");
@@ -379,6 +382,126 @@ fn missing_root_fails_only_on_stderr() {
     }
 }
 
+#[test]
+fn agent_feedback_tool_accepts_only_recent_deliveries() {
+    let dir = workspace();
+    let db = rusqlite::Connection::open(dir.path().join(".elo/elo.db")).unwrap();
+    let insert_item = |id: &str| {
+        db.execute(
+            "INSERT INTO items (id, kind, scope, title, body, origin, triggers, created_at, updated_at) \
+             VALUES (?1, 'rule', 'global', 't', 'b', 'agent', '{}', 0, 0)",
+            [id],
+        )
+        .unwrap();
+    };
+    insert_item("a1");
+    insert_item("b1");
+    let inject = |session: &str, seq: i64, item: &str| {
+        db.execute(
+            "INSERT INTO injections (session_id, event_seq, item_id, mode, kind, scope, at) \
+             VALUES (?1, ?2, ?3, 'full', 'rule', 'global', 0)",
+            rusqlite::params![session, seq, item],
+        )
+        .unwrap();
+    };
+    inject("s1", 4, "a1");
+    inject("s1", 50, "b1"); // "a1" leaves the 40-event window
+    inject("s2", 3, "b1");
+
+    let mut session = Session::new(dir.path(), None);
+    let resp = session.tool(
+        "elo_feedback",
+        json!({"session_id":"s1","used":["b1"],"ignored":[]}),
+    );
+    assert_eq!(content(&resp), "accepted: b1; rejected: ");
+    // Delivered in a different session does not count.
+    let resp = session.tool(
+        "elo_feedback",
+        json!({"session_id":"s1","used":[],"ignored":["a1"]}),
+    );
+    assert_eq!(content(&resp), "accepted: ; rejected: a1");
+    // The same id is delivered in s2: the report must name that session.
+    let resp = session.tool("elo_feedback", json!({"session_id":"s2","used":["b1"]}));
+    assert_eq!(content(&resp), "accepted: b1; rejected: ");
+    // Omitting session_id is rejected by schema validation; an empty session_id rejects every id.
+    let resp = session.tool("elo_feedback", json!({"used":["b1"],"ignored":["a1"]}));
+    assert_eq!(resp["error"]["code"], -32602);
+    let resp = session.tool(
+        "elo_feedback",
+        json!({"session_id":"","used":["b1"],"ignored":["a1"]}),
+    );
+    assert_eq!(content(&resp), "accepted: ; rejected: b1, a1");
+    // More than twenty ids per list comes back as a tool error, not a crash.
+    let ids: Vec<Value> = (0..21).map(|i| json!(format!("x{i}"))).collect();
+    let resp = session.tool("elo_feedback", json!({"session_id":"s1","used":ids}));
+    assert_eq!(resp["result"]["isError"], true, "{resp}");
+    assert!(resp.get("error").is_none());
+    assert!(
+        resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("too many ids"),
+        "{resp}"
+    );
+    session.close();
+}
+
+#[test]
+fn end_to_end_hook_feedback_line_accepted_by_mcp() {
+    let dir = workspace();
+    let run_hook = || -> String {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_elo"))
+            .args(["hook", "user-prompt-submit", "--live"])
+            .current_dir(dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let input = json!({"session_id":"e2e-sess","cwd":dir.path(),"prompt":"help"});
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    for _ in 1..=4 {
+        run_hook();
+    }
+    let out5 = run_hook();
+    let line = out5
+        .lines()
+        .find(|l| l.starts_with("Call elo_feedback("))
+        .expect("feedback line on event 5");
+    let sid = line
+        .strip_prefix("Call elo_feedback(session_id:\"")
+        .and_then(|s| s.split_once('"'))
+        .map(|(s, _)| s)
+        .expect("session_id in feedback line");
+    let ids_part = line
+        .rsplit_once("for these delivered ids: [")
+        .and_then(|(_, rest)| rest.strip_suffix("]."))
+        .expect("delivered ids list");
+    let delivered: Vec<String> = ids_part
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert_eq!(sid, "e2e-sess");
+    assert_eq!(delivered, vec!["law-base".to_string()]);
+
+    let mut mcp = Session::new(dir.path(), None);
+    let resp = mcp.tool(
+        "elo_feedback",
+        json!({"session_id": sid, "used": delivered, "ignored": []}),
+    );
+    assert_eq!(content(&resp), "accepted: law-base; rejected: ");
+    mcp.close();
+}
+
 fn protocol_meta(version: &str) -> Value {
     json!({
         "io.modelcontextprotocol/protocolVersion": version,
@@ -394,7 +517,7 @@ fn discovery_and_modern_tools_without_handshake() {
     // Ferramentas funcionam inclusive antes de discover.
     let meta = protocol_meta("2026-07-28");
     let list = session.request(json!(1), "tools/list", json!({"_meta":meta}));
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 8);
     assert_eq!(list["result"]["resultType"], "complete");
     let added = session.request(
         json!(2),

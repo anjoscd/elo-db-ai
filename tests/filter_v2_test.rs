@@ -48,8 +48,17 @@ fn indice_respeita_bytes_foco_limite_e_leis() {
     fx.items[0].kind = Kind::Law;
     let s = E1.select(&fx, &ev, &mut state);
     assert_eq!(s.full_ids, ["r"]);
-    state.record(&s);
-    assert_eq!(E1.select(&fx, &ev, &mut state).pointer_ids, ["r"]);
+    state.record(&ev, &s);
+    // Real mode: a law already served this session is not pointed again.
+    assert_eq!(
+        E1.select(&fx, &ev, &mut state).pointer_ids,
+        Vec::<String>::new()
+    );
+    // After a compaction it comes back in full.
+    ev.event_type = "compaction".into();
+    state.begin_event(&ev);
+    ev.event_type = "user-prompt-submit".into();
+    assert_eq!(E1.select(&fx, &ev, &mut state).full_ids, ["r"]);
 }
 #[test]
 fn placar_rebaixa_sem_mutar_e_preserva_lei_do_usuario() {

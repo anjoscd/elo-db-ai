@@ -35,6 +35,8 @@ pub enum ConfigError {
     },
     #[error("workspace.budget_bytes must be greater than zero")]
     BudgetEmpty,
+    #[error("shadow.abstain_min_score must be between 0 and 1, got {0}")]
+    ShadowScoreRange(f64),
     #[error("workspace.min_score must be between 0 and 1, got {0}")]
     MinScoreRange(f64),
     #[error("quota `{name}` must be between 0 and 1, got {value}")]
@@ -72,9 +74,59 @@ pub struct Config {
     pub links: Vec<Link>,
     pub quotas: Quotas,
     pub work: Work,
+    pub shadow: Shadow,
     /// `[[guard]]`: laws checked before each tool call (`elo hook pre-tool-use`).
     #[serde(rename = "guard")]
     pub guards: Vec<crate::guard::Guard>,
+    /// `[feedback]`: agent self-report settings.
+    pub feedback: Feedback,
+    /// `[maintain]`: idle maintenance settings.
+    pub maintain: Maintain,
+}
+
+/// `[feedback]`: controls how often the agent is asked to report usefulness.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Feedback {
+    /// Ask for feedback every N events (0 disables it).
+    pub ask_every: u64,
+}
+
+impl Default for Feedback {
+    fn default() -> Self {
+        Self { ask_every: 5 }
+    }
+}
+
+/// `[maintain]`: controls idle-cycle invitations.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Maintain {
+    /// Invite the agent to run catalog+propose during idle sessions.
+    pub auto_invite: bool,
+}
+
+impl Default for Maintain {
+    fn default() -> Self {
+        Self { auto_invite: true }
+    }
+}
+
+/// Shadow-only abstention telemetry; never changes delivery.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Shadow {
+    pub enabled: bool,
+    pub abstain_min_score: f64,
+}
+
+impl Default for Shadow {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            abstain_min_score: 0.55,
+        }
+    }
 }
 
 /// `[work]`: projects, tasks and handoffs (`.elo/work.db`).
@@ -184,6 +236,9 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.workspace.min_score) {
             return Err(ConfigError::MinScoreRange(self.workspace.min_score));
+        }
+        if !(0.0..=1.0).contains(&self.shadow.abstain_min_score) {
+            return Err(ConfigError::ShadowScoreRange(self.shadow.abstain_min_score));
         }
         self.quotas.validate()?;
         self.validate_projects()?;

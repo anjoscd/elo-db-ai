@@ -1,7 +1,7 @@
 use elo_ctx::{
     hook,
     stats::{GroupBy, Mode},
-    store::{NewItem, Store},
+    store::{NewItem, Store, StoreError},
     usage,
 };
 use serde_json::json;
@@ -168,6 +168,198 @@ fn extraction_identifiers_bash_paths_and_workspace_boundary() {
 }
 
 #[test]
+fn agent_feedback_rejects_undelivered_foreign_and_stale_ids() {
+    let (dir, mut store) = setup("rule");
+    deliver(&dir); // seq 0 -> "R" delivered in session "s"
+    event(&dir, "Edit", json!({"file_path":"src/a.rs"}));
+
+    let (acc, rej) = store
+        .record_agent_feedback("s", &["R".into(), "GHOST".into()], &[], 40)
+        .unwrap();
+    assert_eq!(acc, vec!["R".to_string()]);
+    assert_eq!(rej, vec!["GHOST".to_string()]);
+
+    // Delivered elsewhere is not delivered here.
+    let (acc2, rej2) = store
+        .record_agent_feedback("other", &["R".into()], &[], 40)
+        .unwrap();
+    assert!(acc2.is_empty());
+    assert_eq!(rej2, vec!["R".to_string()]);
+
+    // A delivery outside the recent window no longer counts as delivered.
+    for id in ["W40", "W41"] {
+        store
+            .insert_item(&NewItem {
+                id,
+                kind: "rule",
+                scope: "global",
+                title: "t",
+                body: "b",
+                origin: "user",
+            })
+            .unwrap();
+    }
+    store
+        .record_injection("s", 10, 3, &[("W41", Mode::Pointer)])
+        .unwrap();
+    store
+        .record_injection("s", 11, 3, &[("W40", Mode::Pointer)])
+        .unwrap();
+    store
+        .record_injection("s", 50, 3, &[("R", Mode::Full)])
+        .unwrap();
+    // At current seq 50 with window 40, [11, 50] has 40 positions: seq 11 is accepted, seq 10 is rejected.
+    let (acc3, rej3) = store
+        .record_agent_feedback("s", &["W40".into(), "W41".into()], &[], 40)
+        .unwrap();
+    assert_eq!(acc3, vec!["W40".to_string()]);
+    assert_eq!(rej3, vec!["W41".to_string()]);
+
+    // Advancing the session to seq 100 without delivering any item ages out seq 10 and seq 50.
+    std::fs::create_dir_all(dir.path().join(".elo/sessions")).unwrap();
+    std::fs::write(
+        dir.path().join(".elo/sessions/s.json"),
+        serde_json::json!({"seq": 100, "state": {}}).to_string(),
+    )
+    .unwrap();
+    let (acc4, rej4) = store
+        .record_agent_feedback("s", &["R".into()], &[], 40)
+        .unwrap();
+    assert!(acc4.is_empty());
+    assert_eq!(rej4, vec!["R".to_string()]);
+}
+
+#[test]
+fn agent_feedback_limits_each_list_to_twenty_ids() {
+    let (_dir, store) = setup("rule");
+    let ids: Vec<String> = (0..21).map(|i| format!("x{i}")).collect();
+    let err = store
+        .record_agent_feedback("s", &ids, &[], 40)
+        .expect_err("twenty-one ids are too many");
+    match &err {
+        StoreError::Io { path, .. } => assert_eq!(path.to_string_lossy(), "feedback"),
+        other => panic!("unexpected error {other:?}"),
+    }
+    let ids20: Vec<String> = (0..20).map(|i| format!("y{i}")).collect();
+    // All rejected as undelivered, but the call itself must succeed at exactly 20.
+    let (acc, rej) = store.record_agent_feedback("s", &ids20, &[], 40).unwrap();
+    assert!(acc.is_empty());
+    assert_eq!(rej.len(), 20);
+}
+
+#[test]
+fn agent_feedback_used_is_corroborated_by_the_objective_signal() {
+    let (dir, store) = setup("rule");
+    deliver(&dir);
+    event(&dir, "Edit", json!({"file_path":"src/a.rs"}));
+    let (acc, _rej) = store
+        .record_agent_feedback("s", &["R".into()], &[], 40)
+        .unwrap();
+    assert_eq!(acc, vec!["R".to_string()]);
+    let corroborated: i64 = store
+        .conn
+        .query_row(
+            "SELECT corroborated FROM agent_feedback WHERE item_id='R'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(corroborated, 1);
+}
+
+#[test]
+fn agent_corroboration_is_recalculated_when_the_signal_arrives_later() {
+    let (dir, store) = setup("rule");
+    deliver(&dir);
+    let (acc, _rej) = store
+        .record_agent_feedback("s", &["R".into()], &[], 40)
+        .unwrap();
+    assert_eq!(acc.len(), 1);
+    let stats = store.stats(None, GroupBy::Kind).unwrap();
+    assert_eq!(
+        (
+            stats.agent_used,
+            stats.agent_ignored,
+            stats.agent_corroborated
+        ),
+        (1, 0, 0)
+    );
+    // The objective signal shows up after the report.
+    event(&dir, "Edit", json!({"file_path":"src/a.rs"}));
+    let stats = store.stats(None, GroupBy::Kind).unwrap();
+    assert_eq!(
+        (
+            stats.agent_used,
+            stats.agent_ignored,
+            stats.agent_corroborated,
+            stats.agent_contradicted,
+        ),
+        (1, 0, 1, 0)
+    );
+}
+
+#[test]
+fn ignored_verdict_with_objective_signal_is_contradicted_not_corroborated() {
+    let (dir, store) = setup("rule");
+    deliver(&dir);
+    event(&dir, "Edit", json!({"file_path":"src/a.rs"}));
+    let (acc, rej) = store
+        .record_agent_feedback("s", &[], &["R".into()], 40)
+        .unwrap();
+    assert_eq!(acc, vec!["R".to_string()]);
+    assert!(rej.is_empty());
+    let corroborated: i64 = store
+        .conn
+        .query_row(
+            "SELECT corroborated FROM agent_feedback WHERE item_id='R'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(corroborated, 0);
+    let stats = store.stats(None, GroupBy::Kind).unwrap();
+    assert_eq!(stats.agent_used, 0);
+    assert_eq!(stats.agent_ignored, 1);
+    assert_eq!(stats.agent_corroborated, 0);
+    assert_eq!(stats.agent_contradicted, 1);
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_elo"))
+        .arg("stats")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("agent corroborated n/a"), "{stdout}");
+    assert!(stdout.contains("agent contradicted 1"), "{stdout}");
+}
+
+#[test]
+fn agent_concordance_handles_multiple_owner_and_agent_verdicts_without_cartesian_product() {
+    let (_dir, mut store) = setup("rule");
+    // 2 good and 1 bad from the owner -> net owner verdict is "good".
+    store.record_feedback("R", true).unwrap();
+    store.record_feedback("R", true).unwrap();
+    store.record_feedback("R", false).unwrap();
+    // 3 deliveries across sessions: 2 "used" (agree) and 1 "ignored" (disagree).
+    for (sid, used, ignored) in [
+        ("s1", vec!["R".to_string()], vec![]),
+        ("s2", vec!["R".to_string()], vec![]),
+        ("s3", vec![], vec!["R".to_string()]),
+    ] {
+        store
+            .record_injection(sid, 1, 10, &[("R", Mode::Full)])
+            .unwrap();
+        store
+            .record_agent_feedback(sid, &used, &ignored, 40)
+            .unwrap();
+    }
+    let stats = store.stats(None, GroupBy::Kind).unwrap();
+    assert_eq!(stats.agent_agree, 2);
+    assert_eq!(stats.agent_disagree, 1);
+}
+
+#[test]
 fn migration_v3_backs_up_history_and_newer_schema_is_rejected() {
     let (dir, mut store) = setup("rule");
     store.record_feedback("R", true).unwrap();
@@ -177,7 +369,7 @@ fn migration_v3_backs_up_history_and_newer_schema_is_rejected() {
     store.conn.execute_batch("DROP TABLE auto_usage; DROP INDEX injections_session_event; UPDATE meta SET value='3' WHERE key='schema_version'").unwrap();
     drop(store);
     let store = Store::open(dir.path()).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.schema_version().unwrap(), 5);
     store.check_schema().unwrap();
     assert_eq!(store.stats(None, GroupBy::Kind).unwrap().good, 1);
     let backup = std::fs::read_dir(dir.path().join(".elo"))
@@ -198,7 +390,7 @@ fn migration_v3_backs_up_history_and_newer_schema_is_rejected() {
     );
     store
         .conn
-        .execute("UPDATE meta SET value='5' WHERE key='schema_version'", [])
+        .execute("UPDATE meta SET value='6' WHERE key='schema_version'", [])
         .unwrap();
     assert!(matches!(
         Store::open(dir.path()),

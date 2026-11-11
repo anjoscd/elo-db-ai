@@ -142,7 +142,7 @@ args = ["mcp", "--root", "/path/to/workspace"]
 }
 ```
 
-Tools: `elo_recall` searches memories; `elo_context` reads a scope or topic; `elo_add` saves text (default kind `note`, scope `global`, optional `keywords` and `paths`); `elo_explain` explains an item; `elo_map` queries the code map. Writes have agent origin, so laws are refused. Run `elo map sync` before map queries. Other MCP stdio clients use the same command and arguments; tool availability also depends on the client's MCP support.
+Tools: `elo_recall` searches memories; `elo_context` reads a scope or topic; `elo_add` saves text (default kind `note`, scope `global`, optional `keywords` and `paths`); `elo_explain` explains an item; `elo_map` queries the code map; `elo_feedback` lets the agent report which delivered ids it used or ignored (shadow mode: recorded, never changes selection; only ids delivered in the same session are accepted); `elo_maintain_catalog` and `elo_maintain_propose` let the agent suggest maintenance (paths, always-on, scope, merges), validated and kept pending until you review it. Writes have agent origin, so laws are refused. Run `elo map sync` before map queries. Other MCP stdio clients use the same command and arguments; tool availability also depends on the client's MCP support.
 
 ### Claude Code hooks
 
@@ -268,11 +268,17 @@ elo recipe add "Verify a change" \
 elo recipe list
 elo maintain
 elo maintain --apply
+elo maintain review                  # proposals made by the agent
+elo maintain review --apply 3,4      # apply chosen proposals (laws need an explicit id)
+elo maintain review --apply-nonlaw   # apply every pending proposal except laws
+elo shadow calibrate                 # score bands vs. observed usage, to tune abstention
 ```
 
 Recipes require at least two steps and are stored as global notes. The commands use the English option names; the old Portuguese names still work as hidden aliases.
 
 `elo maintain` shows a plan. `--apply` first backs up the store, then attempts valid duplicate supersessions, marks expired items and removes old or orphaned automatic usage rows. Similar decisions/notes are suggestions for manual review; duplicate laws are reported without automatic consolidation.
+
+`elo maintain review` lists proposals submitted by the agent through MCP. Each one was validated when submitted and is validated again before it is applied, inside a single transaction; only triggers or scope change, never titles or bodies. `elo shadow calibrate` reads the local shadow log, which records whether the selector would have stayed silent on each prompt, and shows, per score band, how often something was used and how often you marked it bad.
 
 ## Evaluation
 

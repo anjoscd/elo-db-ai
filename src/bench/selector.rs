@@ -15,12 +15,17 @@ pub struct SessionState {
     pub recent_prompts: Vec<String>,
     /// Files touched in this session, with the event_seq of the last touch.
     pub touched: Vec<(String, u64)>,
+    /// Items emitted as pointers in this session, mapped to the event_seq of the last pointer.
+    /// Cleared on compaction and session-start together with `served`.
+    #[serde(default)]
+    pub pointed: BTreeMap<String, u64>,
 }
 
 impl SessionState {
     pub fn begin_event(&mut self, ev: &Event) {
         if matches!(ev.event_type.as_str(), "compaction" | "session-start") {
             self.served.clear();
+            self.pointed.clear();
             self.touched.clear();
             // The topic survives a compaction; only a new session forgets it.
             if ev.event_type == "session-start" {
@@ -33,17 +38,25 @@ impl SessionState {
         }
     }
 
-    pub fn record(&mut self, selection: &Selection) {
+    pub fn record(&mut self, ev: &Event, selection: &Selection) {
         self.served.extend(selection.full_ids.iter().cloned());
+        for id in &selection.pointer_ids {
+            self.pointed.insert(id.clone(), ev.event_seq);
+        }
     }
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Selection {
+    pub shadow: Option<crate::shadow::ShadowDecision>,
     pub full_ids: Vec<String>,
     pub pointer_ids: Vec<String>,
     pub used_bytes: usize,
     pub omitted_notes: Vec<(usize, String)>,
+    /// Number of pointer candidates dropped by the real-mode pointer cap.
+    pub omitted_pointers: usize,
+    /// Optional agent self-evaluation request rendered inside the envelope.
+    pub feedback_line: Option<String>,
 }
 
 impl Selection {
@@ -52,7 +65,10 @@ impl Selection {
             full_ids,
             pointer_ids,
             used_bytes: 0,
+            shadow: None,
             omitted_notes: vec![],
+            omitted_pointers: 0,
+            feedback_line: None,
         };
         selection.used_bytes = render(fx, ev, &selection).len();
         selection
@@ -94,6 +110,7 @@ pub fn render(fx: &Fixture, ev: &Event, selection: &Selection) -> String {
     if selection.full_ids.is_empty()
         && selection.pointer_ids.is_empty()
         && selection.omitted_notes.is_empty()
+        && selection.feedback_line.is_none()
     {
         return String::new();
     }
@@ -151,6 +168,15 @@ pub(crate) fn render_content(fx: &Fixture, selection: &Selection) -> String {
             "+{count} notes (elo recall {})\n",
             inline(keyword)
         ));
+    }
+    if selection.omitted_pointers > 0 {
+        content.push_str(&format!(
+            "+{} more → elo context\n",
+            selection.omitted_pointers
+        ));
+    }
+    if let Some(line) = &selection.feedback_line {
+        content.push_str(&format!("{}\n", escape(line)));
     }
     content
 }

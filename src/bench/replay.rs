@@ -100,7 +100,7 @@ pub fn aggregate(
         }
         missing += usize::from(ev.prompt.is_none());
         let selection = E1.select(fx, &ev, state);
-        state.record(&selection);
+        state.record(&ev, &selection);
         if let Some(out) = dump.as_mut() {
             // Evaluation only (blind tests): what the selector would deliver for this prompt.
             let line = serde_json::json!({

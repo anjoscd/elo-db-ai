@@ -109,3 +109,27 @@ fn measurement_is_deterministic() {
         serde_json::to_string(&b.selectors).expect("serializes")
     );
 }
+
+#[test]
+fn benchmark_mode_outputs_never_contain_more_line() {
+    use elo_ctx::bench::elo_selector::E1;
+    use elo_ctx::bench::selector::{render, Selector, SessionState};
+    let fx = load_fixture(fixture_dir()).expect("fixture v0 loads");
+    let mut sessions: std::collections::BTreeMap<&str, SessionState> =
+        std::collections::BTreeMap::new();
+    for ev in &fx.events {
+        if ev.allowed_scopes.is_empty() {
+            continue;
+        }
+        let state = sessions.entry(ev.session_id.as_str()).or_default();
+        state.begin_event(ev);
+        let sel = E1.select(&fx, ev, state);
+        let out = render(&fx, ev, &sel);
+        assert!(
+            !out.contains("more → elo context"),
+            "benchmark output contains '+N more → elo context' for event {}",
+            ev.id
+        );
+        state.record(ev, &sel);
+    }
+}
