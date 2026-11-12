@@ -39,7 +39,7 @@ fn status(store: &Store, id: &str) -> (String, Option<String>) {
 
 fn workspace() -> (TempDir, Store) {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     add(
         &store,
         "D-velha",
@@ -151,7 +151,7 @@ fn apply_supersedes_expires_cleans_and_backs_up_but_never_touches_laws() {
 #[test]
 fn similar_notes_are_suggested_but_never_applied() {
     let dir = TempDir::new().unwrap();
-    let mut store = Store::open(dir.path()).unwrap();
+    let mut store = Store::create(dir.path()).unwrap();
     add(
         &store,
         "N-v2",
@@ -195,7 +195,7 @@ fn propose_workspace() -> (TempDir, Store) {
     std::fs::write(dir.path().join("src/a.ts"), "export const a = 1;\n").unwrap();
     std::fs::create_dir(dir.path().join("api")).unwrap();
     std::fs::write(dir.path().join("api/package.json"), "{}\n").unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     for (id, kind, body) in [
         ("r1", "rule", "first rule"),
         ("r2", "rule", "second rule"),
@@ -376,7 +376,7 @@ fn maintain_review_cli_lists_and_applies() {
     std::fs::create_dir(dir.path().join("src")).unwrap();
     std::fs::write(dir.path().join("src/x.rs"), "fn x() {}\n").unwrap();
     {
-        let store = Store::open(dir.path()).unwrap();
+        let store = Store::create(dir.path()).unwrap();
         add(&store, "k1", "rule", "keep me", 100);
         add(&store, "m1", "law", "muted law", 100);
         store
@@ -447,7 +447,7 @@ fn maintain_review_cli_lists_and_applies() {
 #[test]
 fn idle_cycle_invites_only_after_five_sessions_and_a_day() {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     let t0 = 1_700_000_000i64;
     for i in 0..5 {
         assert_eq!(
@@ -512,7 +512,7 @@ fn idle_cycle_invites_only_after_five_sessions_and_a_day() {
     // The two gates stand alone: five sessions are useless without the day,
     // the day is useless without five sessions.
     let dir2 = TempDir::new().unwrap();
-    let store2 = Store::open(dir2.path()).unwrap();
+    let store2 = Store::create(dir2.path()).unwrap();
     store2.meta_set("maintain_sessions_since", "9").unwrap();
     store2
         .meta_set("maintain_last_cycle_at", &(base - 86_401).to_string())
@@ -646,7 +646,7 @@ fn glob_validation_follows_the_delivery_prefix_semantics() {
 #[test]
 fn catalog_truncates_utf8_titles_by_char_and_aggregates_counts() {
     let dir = TempDir::new().unwrap();
-    let mut store = Store::open(dir.path()).unwrap();
+    let mut store = Store::create(dir.path()).unwrap();
     let long_euro = "€".repeat(100);
     let long_emoji = "🦀✨".repeat(50);
     for (id, title) in [("e1", long_euro.as_str()), ("e2", long_emoji.as_str())] {

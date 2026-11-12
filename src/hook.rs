@@ -220,10 +220,10 @@ pub fn deliverable(item: &Item, now: chrono::DateTime<Utc>) -> bool {
             .is_none_or(|exp| chrono::DateTime::parse_from_rfc3339(exp).is_ok_and(|exp| exp > now))
 }
 
-/// Nearest ancestor of `cwd` that holds `.elo/`.
+/// Nearest ancestor of `cwd` that holds a `.elo/elo.db` file.
 pub fn find_root(cwd: &Path) -> Option<PathBuf> {
     cwd.ancestors()
-        .find(|a| a.join(DATA_DIR).is_dir())
+        .find(|a| a.join(DATA_DIR).join("elo.db").is_file())
         .map(Path::to_path_buf)
 }
 

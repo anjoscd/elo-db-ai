@@ -23,7 +23,7 @@ fn item<'a>(id: &'a str, kind: &'a str, title: &'a str, body: &'a str) -> NewIte
 fn creates_a_v1_database() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = database_path(&dir);
-    let store = Store::open_at(&path).expect("open store");
+    let store = Store::create_at(&path).expect("open store");
     assert_eq!(
         store.schema_version().expect("schema version"),
         SCHEMA_VERSION
@@ -36,7 +36,7 @@ fn creates_a_v1_database() {
 fn a_newer_schema_is_refused() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = database_path(&dir);
-    drop(Store::open_at(&path).expect("open store"));
+    drop(Store::create_at(&path).expect("open store"));
 
     let conn = Connection::open(&path).expect("raw connection");
     conn.execute(
@@ -53,7 +53,7 @@ fn a_newer_schema_is_refused() {
 #[test]
 fn full_text_search_finds_an_inserted_item() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let store = Store::open_at(&database_path(&dir)).expect("open store");
+    let store = Store::create_at(&database_path(&dir)).expect("open store");
     let entry = item(
         "item-1",
         "rule",
@@ -69,7 +69,7 @@ fn full_text_search_finds_an_inserted_item() {
 #[test]
 fn an_invalid_kind_is_rejected() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let store = Store::open_at(&database_path(&dir)).expect("open store");
+    let store = Store::create_at(&database_path(&dir)).expect("open store");
     let entry = item("item-1", "opinion", "Guessing", "Guessing is not a kind");
     assert!(store.insert_item(&entry).is_err());
 }
@@ -119,7 +119,7 @@ fn missing_version_is_not_treated_as_version_zero() {
 fn migration_backs_up_committed_wal_and_rewrites_version() {
     let dir = tempfile::tempdir().unwrap();
     let path = database_path(&dir);
-    let store = Store::open_at(&path).unwrap();
+    let store = Store::create_at(&path).unwrap();
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; UPDATE meta SET value = '0' WHERE key = 'schema_version';").unwrap();
     store
@@ -169,7 +169,7 @@ fn migration_backs_up_committed_wal_and_rewrites_version() {
 #[test]
 fn full_text_search_tracks_updates_and_deletes() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open_at(&database_path(&dir)).unwrap();
+    let store = Store::create_at(&database_path(&dir)).unwrap();
     store
         .insert_item(&item("item-1", "note", "Original", "Body"))
         .unwrap();
@@ -196,7 +196,7 @@ fn full_text_search_tracks_updates_and_deletes() {
 fn v2_migrates_feedback_index_without_losing_data_and_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     let path = database_path(&dir);
-    let store = Store::open_at(&path).unwrap();
+    let store = Store::create_at(&path).unwrap();
     store
         .insert_item(&item("keep", "note", "Saved", "searchable"))
         .unwrap();
@@ -251,7 +251,7 @@ fn v2_migrates_feedback_index_without_losing_data_and_is_idempotent() {
 #[test]
 fn version_five_gains_optional_index_without_migration() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     store
         .conn
         .execute_batch(
@@ -275,7 +275,7 @@ fn version_five_gains_optional_index_without_migration() {
 #[test]
 fn optional_index_failure_does_not_prevent_opening() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     store
         .conn
         .execute_batch("DROP INDEX injections_unused_window; BEGIN IMMEDIATE;")

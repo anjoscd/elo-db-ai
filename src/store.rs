@@ -176,23 +176,37 @@ WHERE kind IN ('decision','rule','note');
 ";
 
 impl Store {
-    /// Opens (creating when needed) `<root>/.elo/elo.db`.
+    /// Opens the existing `<root>/.elo/elo.db`, migrating when needed.
     pub fn open(root: &Path) -> Result<Self, StoreError> {
         Self::open_at(&data_dir(root).join(DB_FILE))
     }
 
-    /// Opens (creating when needed) the database at `path`.
-    pub fn open_at(path: &Path) -> Result<Self, StoreError> {
+    /// Creates a store explicitly, or opens and migrates an existing one.
+    pub fn create(root: &Path) -> Result<Self, StoreError> {
+        Self::create_at(&data_dir(root).join(DB_FILE))
+    }
+
+    /// Creates a database at an explicit path.
+    pub fn create_at(path: &Path) -> Result<Self, StoreError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|source| StoreError::Io {
                 path: parent.to_path_buf(),
                 source,
             })?;
         }
+        if path.exists() {
+            return Self::open_at(path);
+        }
+        Self::open_locked(path, true)
+    }
+
+    /// Opens an existing database, preserving schema migrations and backups.
+    pub fn open_at(path: &Path) -> Result<Self, StoreError> {
         // Fast path: an up-to-date store opens without the migration lock (works on a
         // read-only folder and never makes concurrent hooks wait).
         {
-            let conn = Connection::open(path)?;
+            let conn =
+                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
             conn.busy_timeout(std::time::Duration::from_secs(5))?;
             if read_schema_version(&conn)? == Some(SCHEMA_VERSION) && feedback_index_valid(&conn)? {
                 ensure_optional_indexes(&conn);
@@ -202,8 +216,16 @@ impl Store {
                 });
             }
         }
+        Self::open_locked(path, false)
+    }
+
+    fn open_locked(path: &Path, create: bool) -> Result<Self, StoreError> {
         let _guard = migration_lock(path)?;
-        let mut conn = Connection::open(path)?;
+        let mut flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE;
+        if create {
+            flags |= rusqlite::OpenFlags::SQLITE_OPEN_CREATE;
+        }
+        let mut conn = Connection::open_with_flags(path, flags)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         match read_schema_version(&conn)? {
             Some(found) if found > SCHEMA_VERSION => {

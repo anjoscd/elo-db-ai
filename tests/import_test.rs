@@ -19,7 +19,7 @@ const RULE: &str = r#"{"id":"R1","kind":"rule","scope":"project:api","title":"AP
 #[test]
 fn laws_need_as_user_and_nothing_changes_silently() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     let file = write(&dir, &[LAW, RULE]);
     let r = import(&mut store, &file, false, false).expect("import");
     assert_eq!(r.imported, 2);
@@ -50,7 +50,7 @@ fn laws_need_as_user_and_nothing_changes_silently() {
 #[test]
 fn oversized_laws_are_reported_and_kept_as_rules() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     let long = LONG_LAW.replace("XXXX", &"a".repeat(401));
     let file = write(&dir, &[&long]);
     let r = import(&mut store, &file, true, false).expect("import");
@@ -61,7 +61,7 @@ fn oversized_laws_are_reported_and_kept_as_rules() {
 #[test]
 fn bad_lines_are_rejected_with_line_numbers_and_dry_run_writes_nothing() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     let file = write(
         &dir,
         &[
@@ -84,7 +84,7 @@ fn bad_lines_are_rejected_with_line_numbers_and_dry_run_writes_nothing() {
 #[test]
 fn search_index_follows_upserts() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     import(&mut store, &write(&dir, &[RULE]), false, false).expect("first");
     let changed = RULE.replace("Use the client.", "Prefer the gateway.");
     import(&mut store, &write(&dir, &[&changed]), false, false).expect("second");
@@ -95,7 +95,7 @@ fn search_index_follows_upserts() {
 #[test]
 fn untrusted_imports_cannot_touch_user_items_or_set_always() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     import(&mut store, &write(&dir, &[LAW]), true, false).expect("as user");
     let hostile = LAW.replace("Never run migrations against production.", "Anything goes.");
     let always =
@@ -144,7 +144,7 @@ fn status_of(store: &Store, id: &str) -> String {
 #[test]
 fn import_with_supersedes_links_valid_and_rejects_unknown_targets() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     let old = decision("D1", "project:a", "");
     let new = decision("D2", "project:a", r#","supersedes":"D1""#);
     let r = import(&mut store, &write(&dir, &[&old, &new]), false, false).expect("ok");
@@ -169,7 +169,7 @@ fn import_with_supersedes_links_valid_and_rejects_unknown_targets() {
 #[test]
 fn upsert_cannot_move_a_chained_item_to_another_scope() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     let old = decision("D1", "project:a", "");
     let new = decision("D2", "project:a", r#","supersedes":"D1""#);
     import(&mut store, &write(&dir, &[&old, &new]), false, false).expect("ok");
@@ -191,7 +191,7 @@ fn upsert_cannot_move_a_chained_item_to_another_scope() {
 #[test]
 fn import_marks_overdue_items_expired() {
     let dir = TempDir::new().expect("tmp");
-    let mut store = Store::open(dir.path()).expect("open");
+    let mut store = Store::create(dir.path()).expect("open");
     import(
         &mut store,
         &write(&dir, &[&decision("N1", "global", "")]),

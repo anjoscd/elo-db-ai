@@ -371,14 +371,17 @@ fn missing_root_fails_only_on_stderr() {
         let result = command.output().unwrap();
         assert!(!result.status.success());
         assert!(result.stdout.is_empty());
-        assert_eq!(
-            String::from_utf8(result.stderr).unwrap(),
-            if explicit {
+        let stderr = String::from_utf8(result.stderr).unwrap();
+        if explicit {
+            assert_eq!(
+                stderr,
                 "error: no ELO store here (.elo/elo.db); run `elo init`\n"
-            } else {
-                "error: No ELO root found; run `elo init` or use `elo mcp --root <root>`\n"
-            }
-        );
+            );
+        } else {
+            assert!(stderr.contains("No ELO root found"));
+            assert!(stderr
+                .contains("run `elo init` in your workspace root or use `elo mcp --root <root>`"));
+        }
     }
 }
 

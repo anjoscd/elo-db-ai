@@ -475,7 +475,7 @@ fn unused_demotion_only_applies_to_eligible_kinds_in_real_mode() {
 #[test]
 fn unused_window_deduplicates_events_and_expires() {
     let dir = tempfile::tempdir().unwrap();
-    let store = elo_ctx::store::Store::open(dir.path()).unwrap();
+    let store = elo_ctx::store::Store::create(dir.path()).unwrap();
     let now = 2_000_000;
     store
         .conn

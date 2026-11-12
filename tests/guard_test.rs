@@ -29,7 +29,7 @@ fn call(tool: &str, input: Value, cwd: &Path) -> String {
 
 fn workspace(toml: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
-    fs::create_dir_all(dir.path().join(".elo")).unwrap();
+    elo_ctx::store::Store::create(dir.path()).unwrap();
     fs::write(dir.path().join("elo.toml"), toml).unwrap();
     dir
 }

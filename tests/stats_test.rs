@@ -4,7 +4,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 fn store_with_items(dir: &TempDir) -> Store {
-    let store = Store::open_at(&dir.path().join("elo.db")).expect("open");
+    let store = Store::create_at(&dir.path().join("elo.db")).expect("open");
     for (id, kind, scope) in [
         ("L1", "law", "global"),
         ("R1", "rule", "project:api"),

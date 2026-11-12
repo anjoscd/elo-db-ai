@@ -25,7 +25,7 @@ fn entry(kind: &str, scope: &str, title: &str, body: &str) -> NewEntry {
 
 fn store() -> (TempDir, Store) {
     let dir = TempDir::new().expect("tmp");
-    let store = Store::open(dir.path()).expect("open");
+    let store = Store::create(dir.path()).expect("open");
     (dir, store)
 }
 
@@ -280,7 +280,7 @@ fn hook_delivers_future_expiry_and_never_re_emits_filtered_ids() {
     let dir = TempDir::new().expect("tmp");
     fs::create_dir_all(dir.path().join("api")).expect("mkdir");
     fs::write(dir.path().join("api/package.json"), "{}").expect("manifest");
-    let mut s = Store::open(dir.path()).expect("open");
+    let mut s = Store::create(dir.path()).expect("open");
     let now = chrono::Utc::now().timestamp();
     let mut e = entry("note", "global", "futuro", "zebrafutura always relevant");
     e.id = Some("futuro".into());
@@ -437,7 +437,7 @@ fn hook_never_delivers_superseded_expired_or_archived() {
     let dir = TempDir::new().expect("tmp");
     fs::create_dir_all(dir.path().join("api")).expect("mkdir");
     fs::write(dir.path().join("api/package.json"), "{}").expect("manifest");
-    let mut s = Store::open(dir.path()).expect("open");
+    let mut s = Store::create(dir.path()).expect("open");
     let now = chrono::Utc::now().timestamp();
     for (id, word) in [
         ("keep", "zebraalfa"),

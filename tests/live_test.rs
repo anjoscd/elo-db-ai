@@ -10,7 +10,7 @@ use tempfile::TempDir;
 #[test]
 fn items_round_trip_from_the_store_and_feed_the_selector() {
     let dir = TempDir::new().expect("tmp");
-    let store = Store::open(dir.path()).expect("open");
+    let store = Store::create(dir.path()).expect("open");
     store
         .insert_item(&NewItem {
             id: "R1",

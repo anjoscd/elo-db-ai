@@ -6,7 +6,7 @@ use elo_ctx::work::{session_start_block, Work, BLOCK_MAX_BYTES};
 
 fn workspace() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".elo")).unwrap();
+    elo_ctx::store::Store::create(dir.path()).unwrap();
     dir
 }
 

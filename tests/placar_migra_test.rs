@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 fn v4_store() -> TempDir {
     let dir = TempDir::new().unwrap();
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::create(dir.path()).unwrap());
     dir
 }
 

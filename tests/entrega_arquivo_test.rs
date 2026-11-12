@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 fn workspace(toml: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     for (id, kind, body, keywords) in [
         (
             "R-guard",

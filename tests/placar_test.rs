@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 fn setup(kind: &str) -> (TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     store
         .insert_item(&NewItem {
             id: "R",

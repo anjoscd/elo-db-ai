@@ -68,7 +68,7 @@ pub fn init(root: &Path) -> Result<InitOutcome, InitError> {
     let config_path = root.join(CONFIG_FILE);
     let config_written = write_config(&config_path, root)?;
 
-    Store::open(root)?;
+    Store::create(root)?;
 
     Ok(InitOutcome {
         data_dir,

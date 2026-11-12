@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.3]
+
+### Fixed
+
+- Resolve database-using CLI commands and hooks from the nearest ancestor with a `.elo/elo.db` file, skipping incomplete `.elo` directories; setup, update, bench, and hook dispatch do not require a CLI root. Only init creates the main store.
+- Preserve existing-store migrations and keep hooks silent when the database is missing.
+- Warn about nested ELO databases that hide workspace laws, up to three directory levels below the root; skip unreadable entries, symlinks, and generated directories.
+- Initialize new stores under the migration lock using the connection that creates the database.
+- Restore both init and explicit-root guidance when MCP cannot find a root.
+
 ## [0.3.2]
 
 ### Changed

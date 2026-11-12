@@ -25,7 +25,7 @@ pub fn run(root: &Path, out: &mut dyn Write) -> std::io::Result<bool> {
                 if problems.is_empty() {
                     writeln!(
                         out,
-                        "ok   guards: {} ({} enforce, {} sombra)",
+                        "ok   guards: {} ({} enforce, {} shadow)",
                         config.guards.len(),
                         enforced,
                         config.guards.len() - enforced
@@ -52,6 +52,7 @@ pub fn run(root: &Path, out: &mut dyn Write) -> std::io::Result<bool> {
         }
     }
 
+    warn_nested_roots(root, 0, out)?;
     Ok(healthy)
 }
 
@@ -64,4 +65,53 @@ fn summarize(store: &Store) -> Result<String, StoreError> {
         store.path().display(),
         version
     ))
+}
+
+// Count project directories below the root, excluding the .elo directory itself.
+fn warn_nested_roots(root: &Path, depth: usize, out: &mut dyn Write) -> std::io::Result<()> {
+    if depth == 3 {
+        return Ok(());
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Ok(());
+    };
+    let mut entries: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_type()
+                .is_ok_and(|kind| !kind.is_symlink() && kind.is_dir())
+                && !matches!(
+                    entry.file_name().to_str(),
+                    Some(
+                        ".elo"
+                            | "node_modules"
+                            | "target"
+                            | ".git"
+                            | ".venv"
+                            | "venv"
+                            | "build"
+                            | "dist"
+                            | ".next"
+                            | ".cache"
+                            | "vendor"
+                            | ".dart_tool"
+                            | "Pods"
+                    )
+                )
+        })
+        .collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if path.join(".elo/elo.db").is_file() {
+            writeln!(
+                out,
+                "warn nested ELO root: {} hides the workspace root laws for this subfolder; move its items to the workspace root and rename the nested .elo directory",
+                path.join(".elo").display()
+            )?;
+        }
+        warn_nested_roots(&path, depth + 1, out)?;
+    }
+    Ok(())
 }

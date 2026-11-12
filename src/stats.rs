@@ -648,7 +648,7 @@ mod stats_query_tests {
     use crate::store::{NewItem, Store};
 
     fn store_with_rule(dir: &tempfile::TempDir) -> (Store, String) {
-        let store = Store::open_at(&dir.path().join("elo.db")).unwrap();
+        let store = Store::create_at(&dir.path().join("elo.db")).unwrap();
         store
             .insert_item(&NewItem {
                 id: "R1",
@@ -785,7 +785,7 @@ impl Store {
 #[test]
 fn unused_windows_plan_uses_indexed_time_range() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     let plan = store
         .conn
         .prepare(&format!("EXPLAIN QUERY PLAN {UNUSED_WINDOWS_SQL}"))

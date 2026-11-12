@@ -37,7 +37,7 @@ fn add(store: &Store, id: &str, kind: &str, scope: &str, body: &str) {
 
 fn workspace() -> TempDir {
     let dir = TempDir::new().expect("tmp");
-    let store = Store::open(dir.path()).expect("open");
+    let store = Store::create(dir.path()).expect("open");
     add(&store, "R1", "rule", "global", "Run the release checklist.");
     add(
         &store,
@@ -275,7 +275,7 @@ fn hook_index_line_works_with_context() {
 #[test]
 fn two_thousand_items_in_under_the_target() {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     store.conn.execute_batch("BEGIN").unwrap();
     for n in 0..2000 {
         add(
@@ -329,7 +329,7 @@ fn budget_of(dir: &Path, args: &[&str], budget: usize) -> String {
 #[test]
 fn single_item_larger_than_the_budget_is_cut_and_marked() {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     let big = "ção ".repeat(3000);
     add(&store, "BIG", "rule", "global", &big);
     drop(store);
@@ -343,7 +343,7 @@ fn single_item_larger_than_the_budget_is_cut_and_marked() {
 #[test]
 fn many_items_never_exceed_the_budget_and_keep_a_working_command() {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     store.conn.execute_batch("BEGIN").unwrap();
     for n in 0..500 {
         add(
@@ -474,7 +474,7 @@ fn empty_message_is_counted_and_cut_on_utf8_boundaries() {
 #[test]
 fn multiline_cut_keeps_every_item_and_accepts_an_empty_body() {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     add(&store, "A", "rule", "global", &"\n".repeat(1000));
     let minimum_cut = "[rule · global] A: …[cortado]\n";
     for budget in minimum_cut.len()..=150 {
@@ -542,7 +542,7 @@ fn multiline_cut_keeps_every_item_and_accepts_an_empty_body() {
 #[test]
 fn budget_below_first_omitted_id_command_is_a_usage_error() {
     let dir = TempDir::new().unwrap();
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::create(dir.path()).unwrap();
     let scope = format!("project:{}", "x".repeat(200));
     add(&store, "A", "rule", &scope, &"\n".repeat(1000));
     let ids = vec!["A".to_string()];

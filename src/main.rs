@@ -370,24 +370,33 @@ fn main() -> ExitCode {
 }
 
 fn execute(cli: Cli) -> Result<ExitCode, AppError> {
-    let root = Path::new(".");
     match cli.command {
         Command::Mcp { root } => {
-            let root = match root {
+            let resolved = match root {
                 Some(root) => root,
-                None => elo_ctx::hook::find_root(&std::env::current_dir()?).ok_or_else(|| {
-                    AppError::Usage(
-                        "No ELO root found; run `elo init` or use `elo mcp --root <root>`".into(),
-                    )
+                None => resolve_root().map_err(|err| match err {
+                    AppError::Usage(message) => {
+                        AppError::Usage(format!("{message} or use `elo mcp --root <root>`"))
+                    }
+                    other => other,
                 })?,
             };
+            let root = resolved.as_path();
             // Validates the root without keeping a connection open during the session.
-            drop(elo_ctx::context::open(&root)?);
-            elo_ctx::mcp::serve(&root, std::io::stdin().lock(), std::io::stdout().lock())?;
+            drop(elo_ctx::context::open(root)?);
+            elo_ctx::mcp::serve(root, std::io::stdin().lock(), std::io::stdout().lock())?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Init => run_init(root),
-        Command::Doctor => run_doctor(root),
+        Command::Init => {
+            let resolved = std::env::current_dir()?;
+            let root = resolved.as_path();
+            run_init(root)
+        }
+        Command::Doctor => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_doctor(root)
+        }
         Command::Bench {
             replay,
             fixture,
@@ -420,6 +429,8 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             scope,
             dry_run,
         } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let report = elo_ctx::export::run(
                 root,
                 output.as_deref().unwrap_or(root),
@@ -437,7 +448,11 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             ids,
             budget,
             json,
-        } => run_context(root, &target, &words, ids.as_deref(), budget, json),
+        } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_context(root, &target, &words, ids.as_deref(), budget, json)
+        }
         Command::Add {
             kind,
             scope,
@@ -449,26 +464,32 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             expires,
             id,
             as_user,
-        } => run_add(
-            root,
-            elo_ctx::write::NewEntry {
-                kind,
-                scope,
-                title,
-                body,
-                triggers: triggers
-                    .into_iter()
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty())
-                    .collect(),
-                importance,
-                supersedes,
-                expires_at: expires.as_deref().map(parse_expiry).transpose()?,
-                id,
-                as_user,
-            },
-        ),
+        } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_add(
+                root,
+                elo_ctx::write::NewEntry {
+                    kind,
+                    scope,
+                    title,
+                    body,
+                    triggers: triggers
+                        .into_iter()
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect(),
+                    importance,
+                    supersedes,
+                    expires_at: expires.as_deref().map(parse_expiry).transpose()?,
+                    id,
+                    as_user,
+                },
+            )
+        }
         Command::Supersede { old, new } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let mut store = elo_ctx::store::Store::open(root)?;
             match elo_ctx::write::supersede(&mut store, &old, &new)? {
                 elo_ctx::write::Link::Apply => println!("{old} superseded by {new}"),
@@ -479,12 +500,16 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Promote { id } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let mut store = elo_ctx::store::Store::open(root)?;
             elo_ctx::write::promote(&mut store, &id)?;
             println!("{id} promoted to law");
             Ok(ExitCode::SUCCESS)
         }
         Command::Forget { id } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let mut store = elo_ctx::store::Store::open(root)?;
             elo_ctx::write::forget(&mut store, &id)?;
             println!("{id} archived (tombstone kept)");
@@ -498,6 +523,8 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             limit,
             json,
         } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let store = elo_ctx::store::Store::open_read_only(root)?;
             let hits = elo_ctx::recall::recall_now(
                 &store,
@@ -517,10 +544,16 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Explain { id, last, session } => run_explain(root, id.as_deref(), last, session),
+        Command::Explain { id, last, session } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_explain(root, id.as_deref(), last, session)
+        }
         Command::Shadow {
             command: ShadowCommand::Calibrate,
         } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let store = elo_ctx::store::Store::open(root)?;
             let records = elo_ctx::shadow::read(&elo_ctx::store::data_dir(root));
             let buckets = elo_ctx::shadow::calibrate(&store.conn, &records)
@@ -554,8 +587,14 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Stats { since, by } => run_stats(root, since, by),
+        Command::Stats { since, by } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_stats(root, since, by)
+        }
         Command::Recipe { cmd } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
             let mut out = std::io::stdout().lock();
             match cmd {
                 RecipeCmd::Add {
@@ -581,31 +620,39 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Maintain { cmd, apply } => match cmd.as_ref() {
-            Some(MaintainCmd::Review {
-                apply: ids,
-                apply_nonlaw,
-            }) => run_maintain_review(root, ids.as_deref(), *apply_nonlaw),
-            _ => {
-                let mut store = elo_ctx::store::Store::open(root)?;
-                let now = elo_ctx::store::now_seconds();
-                let plan = elo_ctx::maintain::plan(&store, now)
-                    .map_err(|e| AppError::Internal(e.to_string()))?;
-                let applied = if apply {
-                    Some(
-                        elo_ctx::maintain::apply(&mut store, &plan, now)
-                            .map_err(|e| AppError::Internal(e.to_string()))?,
-                    )
-                } else {
-                    None
-                };
-                std::io::stdout()
-                    .lock()
-                    .write_all(elo_ctx::maintain::report(&plan, applied.as_ref()).as_bytes())?;
-                Ok(ExitCode::SUCCESS)
+        Command::Maintain { cmd, apply } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            match cmd.as_ref() {
+                Some(MaintainCmd::Review {
+                    apply: ids,
+                    apply_nonlaw,
+                }) => run_maintain_review(root, ids.as_deref(), *apply_nonlaw),
+                _ => {
+                    let mut store = elo_ctx::store::Store::open(root)?;
+                    let now = elo_ctx::store::now_seconds();
+                    let plan = elo_ctx::maintain::plan(&store, now)
+                        .map_err(|e| AppError::Internal(e.to_string()))?;
+                    let applied = if apply {
+                        Some(
+                            elo_ctx::maintain::apply(&mut store, &plan, now)
+                                .map_err(|e| AppError::Internal(e.to_string()))?,
+                        )
+                    } else {
+                        None
+                    };
+                    std::io::stdout()
+                        .lock()
+                        .write_all(elo_ctx::maintain::report(&plan, applied.as_ref()).as_bytes())?;
+                    Ok(ExitCode::SUCCESS)
+                }
             }
-        },
-        Command::Discover => run_discover(root),
+        }
+        Command::Discover => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_discover(root)
+        }
         Command::Update { check, version } => {
             let current_exe =
                 std::env::current_exe().map_err(|e| AppError::Internal(e.to_string()))?;
@@ -631,26 +678,61 @@ fn execute(cli: Cli) -> Result<ExitCode, AppError> {
             let _ = result;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Map { cmd } => run_map(root, cmd),
+        Command::Map { cmd } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_map(root, cmd)
+        }
         Command::Import {
             file,
             as_user,
             dry_run,
-        } => run_import(root, &file, as_user, dry_run),
-        Command::Good { id } => run_feedback(root, &id, true),
-        Command::Bad { id } => run_feedback(root, &id, false),
-        Command::Project(c) => print_work(elo_ctx::work::cli::project(&work_root(), c)),
-        Command::Task(c) => print_work(elo_ctx::work::cli::task(&work_root(), c)),
-        Command::Milestone(c) => print_work(elo_ctx::work::cli::milestone(&work_root(), c)),
-        Command::Handoff(c) => print_work(elo_ctx::work::cli::handoff(&work_root(), c)),
+        } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_import(root, &file, as_user, dry_run)
+        }
+        Command::Good { id } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_feedback(root, &id, true)
+        }
+        Command::Bad { id } => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            run_feedback(root, &id, false)
+        }
+        Command::Project(c) => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            print_work(elo_ctx::work::cli::project(root, c))
+        }
+        Command::Task(c) => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            print_work(elo_ctx::work::cli::task(root, c))
+        }
+        Command::Milestone(c) => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            print_work(elo_ctx::work::cli::milestone(root, c))
+        }
+        Command::Handoff(c) => {
+            let resolved = resolve_root()?;
+            let root = resolved.as_path();
+            print_work(elo_ctx::work::cli::handoff(root, c))
+        }
     }
 }
 
-fn work_root() -> std::path::PathBuf {
-    std::env::current_dir()
-        .ok()
-        .and_then(|cwd| elo_ctx::hook::find_root(&cwd))
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+fn resolve_root() -> Result<PathBuf, AppError> {
+    let cwd = std::env::current_dir()?;
+    elo_ctx::hook::find_root(&cwd).ok_or_else(|| {
+        AppError::Usage(format!(
+            "No ELO root found from {}; run `elo init` in your workspace root",
+            cwd.display()
+        ))
+    })
 }
 
 fn print_work(result: Result<String, elo_ctx::work::WorkError>) -> Result<ExitCode, AppError> {
