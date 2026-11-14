@@ -63,6 +63,7 @@ fn indice_respeita_bytes_foco_limite_e_leis() {
 #[test]
 fn placar_rebaixa_sem_mutar_e_preserva_lei_do_usuario() {
     let mut fx = live_fixture(std::path::Path::new("."), Config::default(), vec![item()]);
+    fx.config.workspace.full_min_score = 0.0;
     fx.config.workspace.min_score = 0.0;
     fx.config.workspace.index_over_bytes = 0;
     let mut ev = event();
@@ -361,7 +362,9 @@ fn ponteiro_corta_caracteres_antes_do_escape() {
 fn replay_ordena_eventos_antes_de_aplicar_arquivos_tocados_e_usa_prompt() {
     let mut i = item();
     i.triggers.always = false;
-    let fx = live_fixture(std::path::Path::new("."), Config::default(), vec![i]);
+    let mut config = Config::default();
+    config.workspace.full_min_score = 0.0;
+    let fx = live_fixture(std::path::Path::new("."), config, vec![i]);
     let records = [
         serde_json::json!({"at":"2026-01-01T00:00:00Z","cwd":".","session_id":"s","event_seq":1,"event_type":"post-tool-use","tool_paths":["src/a"]}),
         serde_json::json!({"at":"2026-01-01T00:00:00Z","cwd":".","session_id":"s","event_seq":2,"prompt":"normal"}),
@@ -433,11 +436,13 @@ fn fixture_nao_aceita_feedback_forjado() {
 #[test]
 fn unused_demotion_only_applies_to_eligible_kinds_in_real_mode() {
     let mut fx = live_fixture(std::path::Path::new("."), Config::default(), vec![item()]);
+    fx.config.workspace.full_min_score = 0.0;
+    fx.items[0].triggers.keywords = vec!["review".into(), "release".into()];
     fx.config.workspace.index_over_bytes = 0;
     fx.config.workspace.full_notes_max = 0;
     fx.config.workspace.min_score = 0.0;
     let mut ev = event();
-    ev.prompt = Some("foco".into());
+    ev.prompt = Some("review release".into());
     for kind in [Kind::Decision, Kind::Rule, Kind::Note, Kind::Law] {
         fx.items[0].kind = kind;
         for (full_events, auto_used, agent_used, minimum, benchmark, expected) in [
@@ -568,7 +573,9 @@ fn hook_stats_and_explain_observe_unused_demotion() {
         .execute("UPDATE items SET status='active' WHERE id='r'", [])
         .unwrap();
     let config_path = dir.path().join("elo.toml");
-    let original_config = std::fs::read_to_string(&config_path).unwrap();
+    let original_config = std::fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("[workspace]", "[workspace]\nfull_min_score = 0");
     std::fs::write(
         &config_path,
         original_config.replace("[workspace]", "[workspace]\ndemote_unused_min = 0"),

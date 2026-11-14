@@ -329,7 +329,7 @@ mod tests {
         let parse = |text| crate::config::Config::parse(text, Path::new("test.toml"));
         let default = parse("").unwrap().shadow;
         assert!(default.enabled);
-        assert_eq!(default.abstain_min_score, 0.55);
+        assert_eq!(default.abstain_min_score, 0.6);
         let custom = parse("[shadow]\nenabled=false\nabstain_min_score=0.7")
             .unwrap()
             .shadow;

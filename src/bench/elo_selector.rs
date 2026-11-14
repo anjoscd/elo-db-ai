@@ -16,6 +16,11 @@ const TOUCH_WINDOW: u64 = 20;
 const POINTER_REPEAT_WINDOW: u64 = 20;
 /// Real mode only: total pointer cap per event across all categories.
 const MAX_POINTERS: usize = 8;
+
+#[cfg(test)]
+thread_local! {
+    static FALLBACK_RENDER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 const HALF_LIFE_DAYS: f64 = 90.0;
 const W_PROXIMITY: f64 = 0.4;
 const W_RECENCY: f64 = 0.1;
@@ -645,7 +650,6 @@ impl Selector for E1 {
             let d = *df.get(&normalize(k)).unwrap_or(&0) as f64;
             ((n + 1.0) / (d + 1.0)).ln() / max_idf
         };
-        // A single matched word is rare when it has a digit ("150.000") or 8+ characters.
         let now = DateTime::parse_from_rfc3339(&ev.now).ok();
 
         let mut indexed = BTreeSet::new();
@@ -709,21 +713,8 @@ impl Selector for E1 {
             {
                 indexed.insert(item.id.clone());
             }
-            if is_note(item)
-                && fx.config.workspace.full_notes_max > 0
-                && !path_hit
-                && kw
-                    .iter()
-                    .map(|k| normalize(k))
-                    .collect::<BTreeSet<_>>()
-                    .len()
-                    < 2
-                && !(real_prompt
-                    && kw
-                        .iter()
-                        .any(|k| k.chars().any(|c| c.is_numeric()) || k.chars().count() >= 8))
-            {
-                // An update within the last 48 hours does not waive trigger specificity.
+            if is_note(item) && !path_hit && keyword_matches(item, &text) < 2 {
+                // History and single keywords can suggest pointers, never full notes.
                 indexed.insert(item.id.clone());
             }
             if kw.is_empty()
@@ -770,6 +761,9 @@ impl Selector for E1 {
                 + W_RECENCY * recency
                 + W_IMPORTANCE * item.importance.clamp(0.0, 1.0)
                 + W_MATCH * strength;
+            if !path_hit && score < fx.config.workspace.full_min_score {
+                indexed.insert(item.id.clone());
+            }
             if score >= fx.config.workspace.min_score {
                 scored.push((score, item));
             }
@@ -956,9 +950,15 @@ impl Selector for E1 {
                         })
                         .then_with(|| a.id.cmp(&b.id))
                 });
+                let fallback_fits = |next: &Selection| {
+                    #[cfg(test)]
+                    FALLBACK_RENDER_CALLS.with(|calls| calls.set(calls.get() + 1));
+                    render(fx, ev, next).len() <= budget
+                };
+                // Bound evaluations even when candidates are skipped or do not fit.
                 // Up to 3 rules actually added (an item already in full does not use a slot).
                 let mut added = 0;
-                for item in candidates {
+                for item in candidates.into_iter().take(MAX_POINTERS + 3) {
                     if added >= 3 {
                         break;
                     }
@@ -970,16 +970,24 @@ impl Selector for E1 {
                         .paths
                         .iter()
                         .any(|p| touched.iter().any(|t| path_matches(p, t)));
-                    if ev.allowed_scopes.is_empty()
+                    // An unscored fallback has no evidence for full delivery.
+                    let score = scored
+                        .iter()
+                        .find(|(_, candidate)| candidate.id == item.id)
+                        .map(|(score, _)| *score);
+                    if item.kind != Kind::Law
                         && !path_hit
-                        && item
-                            .usage_window
-                            .demoted(item.kind, fx.config.workspace.demote_unused_min)
+                        && (score.is_none_or(|score| score < fx.config.workspace.full_min_score)
+                            || item
+                                .usage_window
+                                .demoted(item.kind, fx.config.workspace.demote_unused_min))
                     {
-                        if !selection.pointer_ids.contains(&item.id) {
+                        if selection.pointer_ids.len() < MAX_POINTERS
+                            && !selection.pointer_ids.contains(&item.id)
+                        {
                             let mut next = selection.clone();
                             next.pointer_ids.push(item.id.clone());
-                            if render(fx, ev, &next).len() <= budget {
+                            if fallback_fits(&next) {
                                 selection = next;
                             }
                         }
@@ -988,13 +996,15 @@ impl Selector for E1 {
                     let mut next = selection.clone();
                     next.pointer_ids.retain(|id| id != &item.id);
                     next.full_ids.push(item.id.clone());
-                    if render(fx, ev, &next).len() <= budget {
+                    if fallback_fits(&next) {
                         selection = next;
                         added += 1;
-                    } else if !selection.pointer_ids.contains(&item.id) {
+                    } else if selection.pointer_ids.len() < MAX_POINTERS
+                        && !selection.pointer_ids.contains(&item.id)
+                    {
                         let mut next = selection.clone();
                         next.pointer_ids.push(item.id.clone());
-                        if render(fx, ev, &next).len() <= budget {
+                        if fallback_fits(&next) {
                             selection = next;
                         }
                     }
@@ -1206,6 +1216,66 @@ mod tests {
         (fx, ev)
     }
 
+    fn fallback_fixture(count: usize) -> (Fixture, Event) {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.config.projects = crate::config::Config::parse(
+            "[[project]]\nname='sample'\nroot='.'",
+            std::path::Path::new("."),
+        )
+        .unwrap()
+        .projects;
+        ev.prompt = Some(String::new());
+        let base = fx.items[0].clone();
+        fx.items = (0..count)
+            .map(|n| {
+                let mut item = base.clone();
+                item.id = format!("rule-{n:03}");
+                item.kind = Kind::Rule;
+                item.scope = "project:sample".into();
+                item.triggers.keywords.clear();
+                item.importance = 1.0;
+                item.updated_at = ev.now.clone();
+                item
+            })
+            .collect();
+        (fx, ev)
+    }
+
+    #[test]
+    fn fallback_render_work_is_bounded_for_two_hundred_untriggered_rules() {
+        let (mut fx, ev) = fallback_fixture(200);
+        for (budget, expected_calls) in [(100_000, MAX_POINTERS), (0, MAX_POINTERS + 3)] {
+            fx.config.workspace.budget_bytes = budget;
+            FALLBACK_RENDER_CALLS.with(|calls| calls.set(0));
+            let selection = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(
+                FALLBACK_RENDER_CALLS.with(|calls| calls.get()),
+                expected_calls
+            );
+            assert!(selection.full_ids.is_empty());
+            assert_eq!(
+                selection.pointer_ids.len(),
+                if budget == 0 { 0 } else { MAX_POINTERS }
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_never_promotes_unscored_rules_with_a_high_synthetic_score() {
+        let (mut fx, ev) = fallback_fixture(1);
+        fx.config.workspace.min_score = 0.9;
+        fx.config.workspace.full_min_score = 0.5;
+        let synthetic = fallback_score(&fx.items[0], 0, DateTime::parse_from_rfc3339(&ev.now).ok())
+            + W_PROXIMITY * (0.6 - 0.2);
+        assert!(synthetic > fx.config.workspace.full_min_score);
+        for always in [false, true] {
+            fx.items[0].triggers.always = always;
+            let selection = E1.select(&fx, &ev, &mut SessionState::default());
+            assert!(selection.full_ids.is_empty());
+            assert_eq!(selection.pointer_ids, ["rule-000"]);
+        }
+    }
+
     #[test]
     fn vague_prompts_inherit_only_recent_topics() {
         let (mut fx, mut ev) = prompt_fixture();
@@ -1251,9 +1321,93 @@ mod tests {
     }
 
     #[test]
-    fn rare_single_keywords_allow_full_notes_only_for_real_prompts() {
+    fn full_score_boundary_and_path_and_law_exemptions() {
+        for kind in [
+            Kind::Note,
+            Kind::Decision,
+            Kind::Rule,
+            Kind::Pitfall,
+            Kind::Law,
+        ] {
+            let (mut fx, ev) = prompt_fixture();
+            fx.items.truncate(1);
+            let item = &mut fx.items[0];
+            item.kind = kind;
+            item.triggers.keywords = vec!["zebra".into(), "herd".into()];
+            item.triggers.always = true;
+            item.triggers.paths = vec!["src/*".into()];
+            item.updated_at = ev.now.clone();
+            item.importance = 0.6;
+            // Global proximity 0.08 + recency 0.1 + importance 0.12 + match 0.3.
+            for (threshold, full) in [(0.599, true), (0.6, true), (0.601, false)] {
+                fx.config.workspace.full_min_score = threshold;
+                let selection = E1.select(&fx, &ev, &mut SessionState::default());
+                assert_eq!(!selection.full_ids.is_empty(), full || kind == Kind::Law);
+                assert_eq!(
+                    !selection.pointer_ids.is_empty(),
+                    !full && kind != Kind::Law
+                );
+            }
+            fx.config.workspace.full_min_score = 1.0;
+            let mut state = SessionState::default();
+            state.touched.push(("src/main.rs".into(), ev.event_seq));
+            assert_eq!(E1.select(&fx, &ev, &mut state).full_ids, ["note-0"]);
+        }
+    }
+
+    #[test]
+    fn score_demotions_respect_both_pointer_caps() {
+        for kind in [Kind::Rule, Kind::Note] {
+            let (mut fx, ev) = prompt_fixture();
+            fx.config.workspace.full_min_score = 1.0;
+            fx.config.workspace.notes_budget_bytes = 0;
+            let base = fx.items[0].clone();
+            fx.items = (0..12)
+                .map(|n| {
+                    let mut item = base.clone();
+                    item.id = format!("item-{n:02}");
+                    item.kind = kind;
+                    item.triggers.keywords = vec!["zebra".into(), "herd".into()];
+                    item
+                })
+                .collect();
+            let selection = E1.select(&fx, &ev, &mut SessionState::default());
+            assert!(selection.full_ids.is_empty());
+            assert_eq!(
+                selection.pointer_ids.len(),
+                if kind == Kind::Note { 5 } else { 8 }
+            );
+        }
+    }
+
+    #[test]
+    fn history_and_single_current_keywords_never_promote_notes() {
+        for kind in [Kind::Note, Kind::Decision] {
+            for prompt in ["please proceed", "zebra", "zebra herd"] {
+                let (mut fx, mut ev) = prompt_fixture();
+                fx.items.truncate(1);
+                fx.config.workspace.full_min_score = 0.0;
+                fx.config.workspace.full_notes_max = 0;
+                fx.items[0].kind = kind;
+                fx.items[0].triggers.keywords = vec!["zebra".into(), "herd".into()];
+                ev.prompt = Some(prompt.into());
+                let mut state = SessionState {
+                    recent_prompts: vec!["zebra herd".into()],
+                    ..Default::default()
+                };
+                let selection = E1.select(&fx, &ev, &mut state);
+                assert_eq!(!selection.full_ids.is_empty(), prompt == "zebra herd");
+                assert_eq!(!selection.pointer_ids.is_empty(), prompt != "zebra herd");
+                fx.items[0].triggers.paths = vec!["src/*".into()];
+                state.touched.push(("src/main.rs".into(), ev.event_seq));
+                assert_eq!(E1.select(&fx, &ev, &mut state).full_ids, ["note-0"]);
+            }
+        }
+    }
+
+    #[test]
+    fn single_keywords_only_allow_pointers() {
         for keyword in ["150.000", "longkeyword", "widget", "zebra"] {
-            let rare = keyword.chars().any(char::is_numeric) || keyword.chars().count() >= 8;
             for benchmark in [false, true] {
                 let (mut fx, mut ev) = prompt_fixture();
                 fx.items
@@ -1264,11 +1418,8 @@ mod tests {
                     ev.allowed_scopes.push("global".into());
                 }
                 let sel = E1.select(&fx, &ev, &mut SessionState::default());
-                assert_eq!(sel.full_ids.contains(&"note-0".into()), !benchmark && rare);
-                assert_eq!(
-                    sel.pointer_ids.contains(&"note-0".into()),
-                    benchmark || !rare
-                );
+                assert!(!sel.full_ids.contains(&"note-0".into()));
+                assert!(sel.pointer_ids.contains(&"note-0".into()));
             }
         }
     }
@@ -1298,7 +1449,9 @@ mod tests {
         let mut state = SessionState::default();
         state.served.insert("rule-4".into());
         let sel = E1.select(&fx, &ev, &mut state);
-        assert_eq!(sel.full_ids, ["rule-3", "rule-2", "rule-1"]);
+        assert_eq!(sel.full_ids, ["rule-3"]);
+        assert!(sel.pointer_ids.contains(&"rule-2".into()));
+        assert!(sel.pointer_ids.contains(&"rule-1".into()));
         assert!(!sel.pointer_ids.contains(&"rule-4".into()));
         assert!(state.recent_prompts.is_empty());
         // History never hides the project rules of an image-only prompt.
@@ -1313,7 +1466,9 @@ mod tests {
         fx.items.push(note);
         let sel = E1.select(&fx, &ev, &mut with_history);
         fx.items.pop();
-        assert_eq!(sel.full_ids, ["rule-3", "rule-2", "rule-1"]);
+        assert_eq!(sel.full_ids, ["rule-3"]);
+        assert!(sel.pointer_ids.contains(&"rule-2".into()));
+        assert!(sel.pointer_ids.contains(&"rule-1".into()));
         assert!(!sel.pointer_ids.contains(&"note-widget".into()));
         let image_prompt = ev.prompt.clone();
         ev.prompt = Some("[Image #2]".into());
@@ -1455,6 +1610,8 @@ mod tests {
     #[test]
     fn served_full_rule_is_not_pointed_again_in_real_mode() {
         let (mut fx, mut ev) = note_fixture(1, false);
+        // Isolate session suppression from the full-delivery score threshold.
+        fx.config.workspace.full_min_score = 0.0;
         fx.config.workspace.budget_bytes = 10_000;
         let mut rule = fx
             .items
@@ -1773,14 +1930,15 @@ mod tests {
     }
 
     #[test]
-    fn recent_decision_requires_a_specific_word_or_two_words() {
+    fn recent_decision_requires_two_current_words() {
         for words in [vec!["widget42"], vec!["payments"], vec!["widget", "view"]] {
             let (mut fx, mut ev) = recent_fixture(&[10]);
+            fx.config.workspace.full_min_score = 0.0;
             fx.items[0].triggers.keywords = words.iter().map(|s| (*s).into()).collect();
             ev.prompt = Some(words.join(" "));
             let sel = E1.select(&fx, &ev, &mut SessionState::default());
-            assert_eq!(sel.full_ids, ["dec-0"]);
-            assert!(sel.pointer_ids.is_empty());
+            assert_eq!(sel.full_ids.contains(&"dec-0".into()), words.len() >= 2);
+            assert_eq!(sel.pointer_ids.contains(&"dec-0".into()), words.len() < 2);
         }
     }
 

@@ -230,3 +230,18 @@ fn rootless_commands_do_not_require_or_create_a_root() {
     assert!(hook(dir.path()).status.success());
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn doctor_warns_about_database_inside_data_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(run(dir.path(), &["init"]).status.success());
+    let nested = dir.path().join(".elo/.elo");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("elo.db"), "").unwrap();
+    let output = run(dir.path(), &["doctor"]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("warn nested ELO database:"));
+    assert!(text.contains(".elo/.elo/elo.db"));
+    assert!(nested.join("elo.db").is_file());
+}

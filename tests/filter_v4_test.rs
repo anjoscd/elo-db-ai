@@ -83,7 +83,7 @@ fn zero_disables_each_policy_independently() {
     )
     .unwrap();
     assert_eq!(
-        select((0..5).map(note).collect(), c.clone(), "revisor")
+        select((0..5).map(note).collect(), c.clone(), "revisor deploy")
             .0
             .full_ids
             .len(),

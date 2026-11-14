@@ -42,6 +42,14 @@ fn shadow_hook_is_silent_scoped_and_never_fails() {
         .status()
         .expect("init")
         .success());
+    // Isolate scope filtering from the full-delivery score threshold.
+    let path = dir.path().join("elo.toml");
+    let config = fs::read_to_string(&path).unwrap();
+    fs::write(
+        path,
+        config.replace("[workspace]", "[workspace]\nfull_min_score = 0"),
+    )
+    .unwrap();
     let jsonl = dir.path().join("in.jsonl");
     fs::write(
         &jsonl,

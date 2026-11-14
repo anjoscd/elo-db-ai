@@ -61,5 +61,6 @@ fn items_round_trip_from_the_store_and_feed_the_selector() {
     let mut state = SessionState::default();
     state.begin_event(&ev);
     let selection = E1.select(&fx, &ev, &mut state);
-    assert_eq!(selection.full_ids, ["R1"]);
+    assert!(selection.full_ids.is_empty());
+    assert_eq!(selection.pointer_ids, ["R1"]);
 }

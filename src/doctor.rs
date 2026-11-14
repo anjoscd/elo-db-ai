@@ -52,6 +52,14 @@ pub fn run(root: &Path, out: &mut dyn Write) -> std::io::Result<bool> {
         }
     }
 
+    let nested_data = root.join(".elo/.elo/elo.db");
+    if nested_data.is_file() {
+        writeln!(
+            out,
+            "warn nested ELO database: {} is inside the data directory; move its items to the workspace root and rename the nested .elo directory",
+            nested_data.display()
+        )?;
+    }
     warn_nested_roots(root, 0, out)?;
     Ok(healthy)
 }

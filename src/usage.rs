@@ -373,13 +373,16 @@ fn marked(token: &str) -> bool {
 /// Long or marked words that are specific enough to be looked for in a response.
 fn distinctive(lower: &str) -> bool {
     let length = lower.chars().count();
+    if length >= 2 && lower.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
     if length < 3 || !lower.chars().any(char::is_alphanumeric) {
         return false;
     }
     if marked(lower) {
         return true;
     }
-    length >= 6 && lower.chars().all(char::is_alphabetic) && !COMMON.contains(&lower)
+    length >= 5 && lower.chars().all(char::is_alphabetic) && !COMMON.contains(&lower)
 }
 
 fn distinctive_terms(body: &str) -> BTreeSet<String> {
@@ -429,11 +432,16 @@ pub fn response_uses(item_id: &str, body: &str, response: &str) -> bool {
     for token in response.split(separator) {
         seen.insert(trim_marks(token).to_lowercase());
     }
-    let matched = terms
-        .iter()
-        .filter(|term| seen.contains(term.as_str()))
-        .count();
-    matched >= 3 && (matched * 4 >= terms.len() || matched >= ENOUGH_TERMS)
+    let mut matched = 0;
+    let mut non_numeric = 0;
+    for term in terms.iter().filter(|term| seen.contains(term.as_str())) {
+        matched += 1;
+        if !term.chars().all(char::is_numeric) {
+            non_numeric += 1;
+        }
+    }
+    // Numbers reinforce evidence but cannot establish it on their own.
+    non_numeric >= 2 && matched >= 3 && (matched * 5 >= terms.len() || matched >= ENOUGH_TERMS)
 }
 
 /// Same opening, timeout and schema check as [`record`]; the evidence comes from the
@@ -510,6 +518,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn numbers_only_reinforce_non_numeric_evidence() {
+        let body = "Schedule shipment on 2026-11-05 with limit 42 and quota 75";
+        assert!(!response_uses("item", body, "2026-11-05 42 75"));
+        assert!(!response_uses("item", body, "shipment 2026-11-05 42 75"));
+        assert!(response_uses("item", body, "limit quota 42"));
+        assert!(!response_uses(
+            "item",
+            "limit quota 10 20 30 40 50 60 70 80",
+            "10 20 30 40 50 60 70 80"
+        ));
+    }
+
+    #[test]
+    fn shorter_distinctive_terms_support_rephrased_responses() {
+        assert!(distinctive("42"));
+        assert!(distinctive("100"));
+        assert!(distinctive("limit"));
+        assert!(!distinctive("4"));
+        assert!(!distinctive("a2"));
+        assert!(!distinctive("four"));
+        assert!(!distinctive("about"));
+        assert!(response_uses(
+            "item",
+            "The limit is 42 while the quota is 75",
+            "Set quota to 75 and limit to 42"
+        ));
+        assert!(!response_uses("item", "limit quota 42", "limit 42"));
+    }
+
+    #[test]
+    fn one_fifth_of_terms_is_required_below_the_shortcut() {
+        let body = "alpha bravo delta gamma theta kappa sigma omega cloud plane train crane stone brick steel";
+        assert_eq!(distinctive_terms(body).len(), 15);
+        assert!(response_uses("item", body, "alpha bravo delta"));
+        assert!(!response_uses("item", body, "alpha bravo"));
+        assert!(!response_uses(
+            "item",
+            &format!("{body} copper"),
+            "alpha bravo delta"
+        ));
+    }
+
+    #[test]
     fn literal_id_counts_even_without_a_body() {
         assert!(response_uses("lev-1", "", "the rule lev-1 applies here"));
         assert!(!response_uses("lev-1", "", "nothing to see"));
@@ -570,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn long_bodies_need_eight_terms_not_a_quarter() {
+    fn long_bodies_need_eight_terms_below_the_fraction() {
         let body: String = (0..60).map(|i| format!("termx{i:02}a ")).collect();
         let response: String = (0..8).map(|i| format!("termx{i:02}a ")).collect();
         assert!(response_uses("x", &body, &response));

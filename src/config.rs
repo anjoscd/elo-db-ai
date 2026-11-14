@@ -12,6 +12,7 @@ pub const CONFIG_FILE: &str = "elo.toml";
 
 pub const DEFAULT_BUDGET_BYTES: u64 = 9_000;
 pub const DEFAULT_MIN_SCORE: f64 = 0.35;
+pub const DEFAULT_FULL_MIN_SCORE: f64 = 0.6;
 pub const DEFAULT_PROJECT_QUOTA: f64 = 0.50;
 pub const DEFAULT_LINK_QUOTA: f64 = 0.25;
 pub const DEFAULT_GLOBAL_QUOTA: f64 = 0.25;
@@ -39,6 +40,8 @@ pub enum ConfigError {
     ShadowScoreRange(f64),
     #[error("workspace.min_score must be between 0 and 1, got {0}")]
     MinScoreRange(f64),
+    #[error("workspace.full_min_score must be between 0 and 1, got {0}")]
+    FullMinScoreRange(f64),
     #[error("quota `{name}` must be between 0 and 1, got {value}")]
     QuotaRange { name: &'static str, value: f64 },
     #[error("quotas must add up to 1.0, got {0}")]
@@ -124,7 +127,7 @@ impl Default for Shadow {
     fn default() -> Self {
         Self {
             enabled: true,
-            abstain_min_score: 0.55,
+            abstain_min_score: 0.6,
         }
     }
 }
@@ -148,6 +151,8 @@ impl Default for Work {
 pub struct Workspace {
     pub budget_bytes: u64,
     pub min_score: f64,
+    /// Minimum score for full non-law delivery unless a touched path matches.
+    pub full_min_score: f64,
     pub index_over_bytes: u64,
     /// Zero removes the cap on full notes/decisions (they still need 2+ keywords or a path).
     pub full_notes_max: usize,
@@ -168,6 +173,7 @@ impl Default for Workspace {
         Self {
             budget_bytes: DEFAULT_BUDGET_BYTES,
             min_score: DEFAULT_MIN_SCORE,
+            full_min_score: DEFAULT_FULL_MIN_SCORE,
             index_over_bytes: 300,
             full_notes_max: 2,
             notes_budget_bytes: 1500,
@@ -242,6 +248,11 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.workspace.min_score) {
             return Err(ConfigError::MinScoreRange(self.workspace.min_score));
+        }
+        if !(0.0..=1.0).contains(&self.workspace.full_min_score) {
+            return Err(ConfigError::FullMinScoreRange(
+                self.workspace.full_min_score,
+            ));
         }
         if !(0.0..=1.0).contains(&self.shadow.abstain_min_score) {
             return Err(ConfigError::ShadowScoreRange(self.shadow.abstain_min_score));

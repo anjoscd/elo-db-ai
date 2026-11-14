@@ -164,6 +164,14 @@ fn post_tool_use_refreshes_only_existing_maps_after_edits() {
 fn prompt_shows_work_once_per_project_and_session_start_marks_it_shown() {
     let dir = TempDir::new().unwrap();
     elo(dir.path(), &["init"]);
+    // Keep this test focused on ordering the work block before full context.
+    let path = dir.path().join("elo.toml");
+    let config = fs::read_to_string(&path).unwrap();
+    fs::write(
+        path,
+        config.replace("[workspace]", "[workspace]\nfull_min_score = 0"),
+    )
+    .unwrap();
     for project in ["app", "outro"] {
         fs::create_dir_all(dir.path().join(project).join("src")).unwrap();
         elo(dir.path(), &["project", "add", project, "--path", project]);

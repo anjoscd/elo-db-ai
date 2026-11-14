@@ -56,6 +56,14 @@ fn init_workspace_with_projects(projects: &[&str]) -> TempDir {
         .status()
         .expect("init")
         .success());
+    // Exercise automatic-message and scope filtering independently of score demotion.
+    let path = dir.path().join("elo.toml");
+    let config = fs::read_to_string(&path).unwrap();
+    fs::write(
+        path,
+        config.replace("[workspace]", "[workspace]\nfull_min_score = 0"),
+    )
+    .unwrap();
     dir
 }
 

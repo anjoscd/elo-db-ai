@@ -10,6 +10,12 @@ use tempfile::TempDir;
 fn setup(kind: &str) -> (TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::create(dir.path()).unwrap();
+    // Usage accounting needs a full delivery before the observed tool action.
+    std::fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nfull_min_score = 0\n",
+    )
+    .unwrap();
     store
         .insert_item(&NewItem {
             id: "R",

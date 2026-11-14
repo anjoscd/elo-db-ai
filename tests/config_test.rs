@@ -122,3 +122,21 @@ projects = {projects}
         }
     }
 }
+
+#[test]
+fn full_min_score_defaults_overrides_and_validation() {
+    assert_eq!(parse("").unwrap().workspace.full_min_score, 0.6);
+    for value in ["0", "0.75", "1"] {
+        let config = parse(&format!("[workspace]\nfull_min_score={value}")).unwrap();
+        assert_eq!(
+            config.workspace.full_min_score,
+            value.parse::<f64>().unwrap()
+        );
+    }
+    for value in ["-0.1", "1.1", "nan", "inf"] {
+        assert!(matches!(
+            parse(&format!("[workspace]\nfull_min_score={value}")),
+            Err(ConfigError::FullMinScoreRange(_))
+        ));
+    }
+}
