@@ -50,6 +50,7 @@ impl SessionState {
 pub struct Selection {
     pub shadow: Option<crate::shadow::ShadowDecision>,
     pub full_ids: Vec<String>,
+    pub path_ids: Vec<String>,
     pub pointer_ids: Vec<String>,
     pub used_bytes: usize,
     pub omitted_notes: Vec<(usize, String)>,
@@ -63,6 +64,7 @@ impl Selection {
     pub fn new(fx: &Fixture, ev: &Event, full_ids: Vec<String>, pointer_ids: Vec<String>) -> Self {
         let mut selection = Self {
             full_ids,
+            path_ids: vec![],
             pointer_ids,
             used_bytes: 0,
             shadow: None,

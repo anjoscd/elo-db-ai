@@ -282,6 +282,8 @@ Receitas exigem pelo menos dois passos e são armazenadas como notas globais. As
 
 Nos prompts reais, decisões, regras e notas entregues completas em pelo menos `[workspace] demote_unused_min = 6` eventos distintos nos últimos `demote_unused_days = 14` dias passam a ponteiros quando não há uso automático nem relato `used` do agente nessa janela. Leis ficam isentas; mínimo `0` desliga a política. Quando as entregas completas saem da janela, os itens voltam a ser testados. `elo stats` e `elo explain <id>` mostram esse rebaixamento. A nota do dono não é a medida de uso; `demote_bad_min` permanece como configuração legada. Fixtures do benchmark mantêm a política anterior.
 
+Itens que não são lei só vão completos com nota de pelo menos `[workspace] full_min_score = 0.6`, ou quando o agente está mexendo num dos seus caminhos de gatilho; fora isso vão como ponteiro. Notas e decisões também precisam de duas palavras-chave distintas do pedido atual. Aumente o valor para menos ruído ou diminua para mais itens completos. Cada entrega registra o motivo (`prompt` ou `path`): mexer num caminho de gatilho só conta como uso depois de uma entrega pelo pedido, e entregas pelo caminho nunca contam para o rebaixamento por desuso.
+
 
 ## Avaliação
 

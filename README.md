@@ -282,6 +282,8 @@ Recipes require at least two steps and are stored as global notes. The commands 
 
 In real prompts, decisions, rules and notes delivered in full in at least `[workspace] demote_unused_min = 6` distinct events over `demote_unused_days = 14` days become pointers if neither automatic usage nor agent `used` reports exist in that window. Laws are exempt; `0` for the minimum disables this policy. As full deliveries age out, items are tested again. `elo stats` and `elo explain <id>` expose this demotion. Owner ratings are not the usage measure; `demote_bad_min` remains a legacy setting. Benchmark fixtures retain their previous policy.
 
+Non-law items go in full only with a score of at least `[workspace] full_min_score = 0.6`, or when the agent is touching one of their trigger paths; otherwise they are pointers. Notes and decisions also need two distinct keywords from the current prompt. Raise the value for less noise or lower it for more full items. Each delivery records why it happened (`prompt` or `path`): touching a trigger path counts as usage only after a prompt delivery, and path deliveries never count towards unused demotion.
+
 
 ## Evaluation
 

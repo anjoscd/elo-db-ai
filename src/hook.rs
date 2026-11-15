@@ -603,7 +603,13 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
                 let ids: Vec<(&str, Mode)> =
                     cue.ids.iter().map(|i| (i.as_str(), Mode::Full)).collect();
                 store
-                    .record_injection(&input.session_id, seq, cue.rendered.len() as u64, &ids)
+                    .record_injection_via(
+                        &input.session_id,
+                        seq,
+                        cue.rendered.len() as u64,
+                        &ids,
+                        &cue.ids,
+                    )
                     .map_err(|e| e.to_string())?;
                 output = Some(cue.rendered);
             }
@@ -701,7 +707,13 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
             )
             .collect();
         store
-            .record_injection(&input.session_id, seq, selection.used_bytes as u64, &ids)
+            .record_injection_via(
+                &input.session_id,
+                seq,
+                selection.used_bytes as u64,
+                &ids,
+                &selection.path_ids,
+            )
             .map_err(|e| e.to_string())?;
         crate::shadow::record(&crate::store::data_dir(root), &fx, &ev, &selection);
         let shadow = root.join(DATA_DIR).join("shadow");

@@ -936,6 +936,20 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
             )?;
         }
     }
+    let path_deliveries: bool = store
+        .conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM injections WHERE via='path' AND at >= ?1)",
+            [since.unwrap_or(i64::MIN)],
+            |row| row.get(0),
+        )
+        .map_err(elo_ctx::store::StoreError::from)?;
+    if path_deliveries {
+        writeln!(
+            out,
+            "auto usage counts trigger paths only for prompt deliveries since 0.3.4"
+        )?;
+    }
     Ok(ExitCode::SUCCESS)
 }
 

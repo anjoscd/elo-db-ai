@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.4]
+
+### Changed
+
+- Stricter full delivery for non-law items: a note, decision, rule or pitfall goes in full only with a score of at least `full_min_score` (default 0.6) or when the agent is touching one of its trigger paths; otherwise it is a pointer. Notes and decisions also need two distinct keywords from the current prompt; history or a single generic keyword can only suggest a pointer. Laws are unchanged. In real use this cut full non-law deliveries by about four fifths. On the bundled fixture, required full recall moved from 21.8% to 21.0% and session recall from 87.3% to 83.9% (all splits); reachable recall stays at 100% and precision is unchanged. Raise or lower `full_min_score` to trade recall for noise.
+- Automatic usage now records why each item was delivered (`via`: `prompt` or `path`). Touching a trigger path counts as evidence only for prompt deliveries; for path deliveries the touch caused the delivery itself, so it would be circular. Path deliveries are not counted towards unused demotion. `elo stats` notes this when the period contains path deliveries.
+- The usage meter accepts numbers only as reinforcement of other evidence and counts shorter distinctive terms.
+- `elo doctor` warns about a nested data directory.
+- Store schema 6 (migrated automatically from 5, with a backup; existing deliveries are recorded as `prompt`).
+
 ## [0.3.3]
 
 ### Fixed

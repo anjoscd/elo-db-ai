@@ -485,7 +485,7 @@ fn unused_window_deduplicates_events_and_expires() {
     store
         .conn
         .execute_batch(
-            "INSERT INTO injections VALUES
+            "INSERT INTO injections (session_id,event_seq,item_id,mode,kind,scope,at) VALUES
         ('s',1,'r','full','rule','global',1000000),
         ('s',1,'r','full','rule','global',1000000),
         ('s',2,'r','pointer','rule','global',1000000),
@@ -542,7 +542,7 @@ fn hook_stats_and_explain_observe_unused_demotion() {
         store
             .conn
             .execute(
-                "INSERT INTO injections VALUES ('anterior',?1,'r','full','rule','global',?2)",
+                "INSERT INTO injections (session_id,event_seq,item_id,mode,kind,scope,at) VALUES ('anterior',?1,'r','full','rule','global',?2)",
                 rusqlite::params![seq, now],
             )
             .unwrap();

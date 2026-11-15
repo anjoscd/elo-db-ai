@@ -57,7 +57,7 @@ fn deliver(dir: &TempDir) {
 }
 
 #[test]
-fn delivered_path_edit_counts_once_other_files_and_citations_do_not() {
+fn delivered_path_counts_once_other_files_and_citations_do_not() {
     let (dir, store) = setup("rule");
     deliver(&dir);
     event(
@@ -338,6 +338,8 @@ fn ignored_verdict_with_objective_signal_is_contradicted_not_corroborated() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("agent corroborated n/a"), "{stdout}");
     assert!(stdout.contains("agent contradicted 1"), "{stdout}");
+    let notice = "auto usage counts trigger paths only for prompt deliveries since 0.3.4";
+    assert!(!stdout.contains(notice), "{stdout}");
 }
 
 #[test]
@@ -375,7 +377,7 @@ fn migration_v3_backs_up_history_and_newer_schema_is_rejected() {
     store.conn.execute_batch("DROP TABLE auto_usage; DROP INDEX injections_session_event; UPDATE meta SET value='3' WHERE key='schema_version'").unwrap();
     drop(store);
     let store = Store::open(dir.path()).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 5);
+    assert_eq!(store.schema_version().unwrap(), 6);
     store.check_schema().unwrap();
     assert_eq!(store.stats(None, GroupBy::Kind).unwrap().good, 1);
     let backup = std::fs::read_dir(dir.path().join(".elo"))
@@ -396,7 +398,7 @@ fn migration_v3_backs_up_history_and_newer_schema_is_rejected() {
     );
     store
         .conn
-        .execute("UPDATE meta SET value='6' WHERE key='schema_version'", [])
+        .execute("UPDATE meta SET value='7' WHERE key='schema_version'", [])
         .unwrap();
     assert!(matches!(
         Store::open(dir.path()),
@@ -571,4 +573,221 @@ fn search_tools_with_path_do_not_count() {
     event(&dir, "Grep", json!({"pattern":"x","path":"src/a.rs"}));
     event(&dir, "Glob", json!({"pattern":"*.rs","path":"src/a.rs"}));
     assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 0);
+}
+
+#[test]
+fn path_deliveries_need_independent_evidence() {
+    for path in ["src/*", "src/a.rs"] {
+        let (dir, store) = setup("rule");
+        store
+            .conn
+            .execute(
+                "UPDATE items SET triggers=?1",
+                [json!({"paths":[path],"keywords":[],"always":true}).to_string()],
+            )
+            .unwrap();
+        assert!(hook::prepare(
+            "pre-tool-use",
+            &json!({"cwd":dir.path(),"session_id":"s","tool_name":"Edit","tool_input":{"file_path":"src/a.rs"}}).to_string()
+        ).unwrap().is_some());
+        let via: String = store
+            .conn
+            .query_row("SELECT via FROM injections", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(via, "path");
+        let touches = usage::extract(
+            dir.path(),
+            dir.path(),
+            "Edit",
+            &json!({"file_path":"src/a.rs"}),
+        );
+        usage::record(dir.path(), "s", 2, 3, &touches).unwrap();
+        assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 0);
+        assert_eq!(
+            usage::record_response(dir.path(), "s", 3, 3, "Applied R.").unwrap(),
+            1
+        );
+        assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 1);
+    }
+}
+
+#[test]
+fn file_and_identifier_keywords_remain_usage_evidence() {
+    for (keyword, input) in [
+        ("vite.config.ts", json!({"file_path":"app/vite.config.ts"})),
+        (
+            "parse_config",
+            json!({"file_path":"src/a.rs","old_string":"parse_config()"}),
+        ),
+    ] {
+        let (dir, mut store) = setup("rule");
+        store
+            .conn
+            .execute(
+                "UPDATE items SET triggers=?1",
+                [json!({"paths":[],"keywords":[keyword],"always":true}).to_string()],
+            )
+            .unwrap();
+        store
+            .record_injection_via("s", 1, 10, &[("R", Mode::Full)], &["R".into()])
+            .unwrap();
+        let touches = usage::extract(dir.path(), dir.path(), "Edit", &input);
+        usage::record(dir.path(), "s", 2, 3, &touches).unwrap();
+        assert_eq!(
+            store.stats(None, GroupBy::Kind).unwrap().auto_used,
+            1,
+            "{keyword}"
+        );
+    }
+}
+
+#[test]
+fn path_only_deliveries_do_not_accumulate_unused_demotion() {
+    let (dir, mut store) = setup("rule");
+    store
+        .conn
+        .execute(
+            "UPDATE items SET triggers=?1",
+            [json!({"paths":["src/*"],"keywords":[],"always":false}).to_string()],
+        )
+        .unwrap();
+    for seq in 1..=10 {
+        store
+            .record_injection_via("s", seq, 10, &[("R", Mode::Full)], &["R".into()])
+            .unwrap();
+        let touches = usage::extract(
+            dir.path(),
+            dir.path(),
+            "Edit",
+            &json!({"file_path":"src/a.rs"}),
+        );
+        usage::record(dir.path(), "s", seq as u64 + 1, 3, &touches).unwrap();
+    }
+    assert_eq!(store.stats(None, GroupBy::Kind).unwrap().full, 10);
+    assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 0);
+    let window = store
+        .unused_windows(elo_ctx::store::now_seconds(), 14)
+        .remove("R")
+        .unwrap_or_default();
+    assert_eq!(window.full_events, 0);
+    assert!(!window.demoted(elo_ctx::bench::fixture::Kind::Rule, 6));
+    for seq in 11..=20 {
+        store
+            .record_injection("s", seq, 10, &[("R", Mode::Full)])
+            .unwrap();
+    }
+    let window = store
+        .unused_windows(elo_ctx::store::now_seconds(), 14)
+        .remove("R")
+        .unwrap();
+    assert_eq!(window.full_events, 10);
+    assert!(window.demoted(elo_ctx::bench::fixture::Kind::Rule, 6));
+}
+
+#[test]
+fn migration_v5_preserves_history_and_defaults_to_prompt() {
+    let (dir, mut store) = setup("rule");
+    store
+        .record_injection("s", 1, 10, &[("R", Mode::Full)])
+        .unwrap();
+    store
+        .conn
+        .execute_batch(
+            "DROP INDEX injections_unused_window; ALTER TABLE injections DROP COLUMN via;
+        UPDATE meta SET value='5' WHERE key='schema_version';",
+        )
+        .unwrap();
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 6);
+    store.check_schema().unwrap();
+    let via: String = store
+        .conn
+        .query_row("SELECT via FROM injections", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(via, "prompt");
+    let backup = std::fs::read_dir(dir.path().join(".elo"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("backup-v5-"))
+        .unwrap();
+    let backup = rusqlite::Connection::open(backup.path()).unwrap();
+    let version: String = backup
+        .query_row(
+            "SELECT value FROM meta WHERE key='schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "5");
+    let count: i64 = backup
+        .query_row("SELECT COUNT(*) FROM injections", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+    assert!(backup.prepare("SELECT via FROM injections").is_err());
+}
+
+#[test]
+fn stats_notice_only_for_path_deliveries_in_period() {
+    let (dir, mut store) = setup("rule");
+    store
+        .record_injection_via("s", 1, 10, &[("R", Mode::Full)], &["R".into()])
+        .unwrap();
+    store
+        .conn
+        .execute("UPDATE injections SET at=1", [])
+        .unwrap();
+    let notice = "auto usage counts trigger paths only for prompt deliveries since 0.3.4";
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_elo"))
+        .arg("stats")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout)
+        .unwrap()
+        .trim_end()
+        .ends_with(notice));
+    let stats = store.stats(Some(2), GroupBy::Kind).unwrap();
+    assert_eq!(stats.full, 0);
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_elo"))
+        .args(["stats", "--since", "2"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{:?}", out);
+    assert!(!String::from_utf8(out.stdout).unwrap().contains(notice));
+}
+
+#[test]
+fn keyword_prompt_delivery_counts_later_path_touch() {
+    let (dir, store) = setup("rule");
+    std::fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nmin_score = 0\nfull_min_score = 0\n",
+    )
+    .unwrap();
+    store
+        .conn
+        .execute(
+            "UPDATE items SET triggers=?1",
+            [json!({"paths":["src/*"],"keywords":["migration"],"always":false}).to_string()],
+        )
+        .unwrap();
+    assert!(hook::prepare(
+        "user-prompt-submit",
+        &json!({"cwd":dir.path(),"session_id":"s","prompt":"please apply the migration now"})
+            .to_string()
+    )
+    .unwrap()
+    .is_some());
+    let via: String = store
+        .conn
+        .query_row("SELECT via FROM injections WHERE mode='full'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(via, "prompt");
+    event(&dir, "Edit", json!({"file_path":"src/a.rs"}));
+    assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 1);
 }

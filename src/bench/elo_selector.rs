@@ -167,7 +167,7 @@ fn safe_relative(path: &str) -> bool {
         })
 }
 
-fn path_matches(pattern: &str, path: &str) -> bool {
+pub(crate) fn path_matches(pattern: &str, path: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => path.starts_with(prefix),
         None => pattern == path,
@@ -1043,6 +1043,19 @@ impl Selector for E1 {
                 fx.config.shadow.abstain_min_score,
             ));
         }
+        selection.path_ids = fx
+            .items
+            .iter()
+            .filter(|item| {
+                selection.full_ids.contains(&item.id)
+                    && item
+                        .triggers
+                        .paths
+                        .iter()
+                        .any(|p| touched.iter().any(|t| path_matches(p, t)))
+            })
+            .map(|item| item.id.clone())
+            .collect();
         selection
     }
 }
@@ -1343,6 +1356,7 @@ mod tests {
                 fx.config.workspace.full_min_score = threshold;
                 let selection = E1.select(&fx, &ev, &mut SessionState::default());
                 assert_eq!(!selection.full_ids.is_empty(), full || kind == Kind::Law);
+                assert!(selection.path_ids.is_empty());
                 assert_eq!(
                     !selection.pointer_ids.is_empty(),
                     !full && kind != Kind::Law
@@ -1351,7 +1365,9 @@ mod tests {
             fx.config.workspace.full_min_score = 1.0;
             let mut state = SessionState::default();
             state.touched.push(("src/main.rs".into(), ev.event_seq));
-            assert_eq!(E1.select(&fx, &ev, &mut state).full_ids, ["note-0"]);
+            let selection = E1.select(&fx, &ev, &mut state);
+            assert_eq!(selection.full_ids, ["note-0"]);
+            assert_eq!(selection.path_ids, ["note-0"]);
         }
     }
 

@@ -13,7 +13,7 @@ pub const DATA_DIR: &str = ".elo";
 pub const DB_FILE: &str = "elo.db";
 
 /// Schema version written by this build.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -168,10 +168,12 @@ CREATE TABLE IF NOT EXISTS proposals (
 CREATE INDEX IF NOT EXISTS proposals_pending ON proposals(applied_at, created_at);
 "#;
 
+const V6_SQL: &str = "ALTER TABLE injections ADD COLUMN via TEXT NOT NULL DEFAULT 'prompt' CHECK (via IN ('path', 'prompt'));";
+
 // Cover full, demotable deliveries without reading injection rows from the table.
 const UNUSED_INDEX_SQL: &str = "
 CREATE INDEX IF NOT EXISTS injections_unused_window
-ON injections(mode, at, item_id, session_id, event_seq)
+ON injections(mode, at, item_id, session_id, event_seq, via)
 WHERE kind IN ('decision','rule','note');
 ";
 
@@ -501,6 +503,7 @@ fn initialize(conn: &mut Connection) -> Result<(), StoreError> {
     transaction.execute_batch(V3_SQL)?;
     transaction.execute_batch(V4_SQL)?;
     transaction.execute_batch(V5_SQL)?;
+    transaction.execute_batch(V6_SQL)?;
     write_version(&transaction)?;
     transaction.commit()?;
     ensure_optional_indexes(conn);
@@ -520,6 +523,14 @@ fn migrate(conn: &mut Connection, from: i64) -> Result<(), StoreError> {
     transaction.execute_batch(V4_SQL)?;
     if from < 5 {
         transaction.execute_batch(V5_SQL)?;
+    }
+    if from < 6
+        && !transaction
+            .prepare("SELECT name FROM pragma_table_info('injections') WHERE name='via'")?
+            .exists([])?
+    {
+        transaction.execute_batch(V6_SQL)?;
+        transaction.execute_batch("DROP INDEX IF EXISTS injections_unused_window;")?;
     }
     write_version(&transaction)?;
     transaction.commit()?;

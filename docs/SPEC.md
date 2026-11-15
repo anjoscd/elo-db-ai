@@ -183,7 +183,7 @@ Invariants, enforced in one transaction per write:
 
 Usefulness relies on `auto_usage` (tools and responses) and `used`/`ignored` reports in `agent_feedback`. Asking the owner for ratings is out of scope. There is no learned adjustment of `importance`.
 
-Decisions, rules, and notes delivered in full in at least `demote_unused_min` distinct events (default 6) within the last `demote_unused_days` days (default 14), without automatic usage or a `used` report in that window, become pointers. Laws are never demoted for disuse, and a touched path keeps an item in full. A zero minimum disables the policy; full deliveries expiring from the window allow retries. The query is aggregated once per event; incompatible schemas do not demote items. Fixtures and events with nonempty `allowed_scopes` preserve the previous policy; `demote_bad_min` is legacy.
+Decisions, rules, and notes delivered in full in at least `demote_unused_min` distinct events (default 6) within the last `demote_unused_days` days (default 14), without automatic usage or a `used` report in that window, become pointers. Laws are never demoted for disuse, and a touched path keeps an item in full. A zero minimum disables the policy; full deliveries expiring from the window allow retries. The query is aggregated once per event; incompatible schemas do not demote items. Deliveries record `via` (`prompt` or `path`); path deliveries are excluded from the unused count and a touch of a trigger path is usage evidence only for prompt deliveries. Non-law items need `score ≥ full_min_score` (default 0.6) or a touched trigger path to go in full. Fixtures and events with nonempty `allowed_scopes` preserve the previous policy; `demote_bad_min` is legacy.
 
 ## 6.4 Calibrated confidence (after M1)
 

@@ -229,6 +229,18 @@ impl Store {
         used_bytes: u64,
         items: &[(&str, Mode)],
     ) -> Result<bool, StoreError> {
+        self.record_injection_via(session_id, event_seq, used_bytes, items, &[])
+    }
+
+    /// Records path delivery origins atomically with the delivered items.
+    pub fn record_injection_via(
+        &mut self,
+        session_id: &str,
+        event_seq: i64,
+        used_bytes: u64,
+        items: &[(&str, Mode)],
+        path_ids: &[String],
+    ) -> Result<bool, StoreError> {
         let now = now_seconds();
         let used = i64::try_from(used_bytes).unwrap_or(i64::MAX);
         let tx = self
@@ -252,8 +264,8 @@ impl Store {
                 .optional()?;
             let (kind, scope) = found.ok_or_else(|| StoreError::UnknownItem((*item_id).into()))?;
             tx.execute(
-                "INSERT INTO injections (session_id, event_seq, item_id, mode, kind, scope, at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO injections (session_id, event_seq, item_id, mode, kind, scope, at, via) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 rusqlite::params![
                     session_id,
                     event_seq,
@@ -261,7 +273,8 @@ impl Store {
                     mode.as_str(),
                     kind,
                     scope,
-                    now
+                    now,
+                    if path_ids.iter().any(|id| id == item_id) { "path" } else { "prompt" }
                 ],
             )?;
         }
@@ -742,7 +755,7 @@ const UNUSED_WINDOWS_SQL: &str = "WITH signals AS (
                         0 AS auto_count, 0 AS agent_count
                     FROM (
                         SELECT DISTINCT item_id, session_id, event_seq
-                        FROM injections WHERE mode='full'
+                        FROM injections WHERE mode='full' AND via='prompt'
                             AND kind IN ('decision','rule','note') AND at >= ?1 AND at <= ?2
                     ) GROUP BY item_id
                     UNION ALL

@@ -188,7 +188,7 @@ pub fn record(
     let seq = i64::try_from(seq).unwrap_or(i64::MAX);
     let lower = seq.saturating_sub(i64::try_from(window).unwrap_or(i64::MAX));
     let mut query = conn.prepare(
-        "SELECT i.event_seq, i.item_id, i.kind, i.scope, t.triggers FROM injections i
+        "SELECT i.event_seq, i.item_id, i.kind, i.scope, t.triggers, i.via FROM injections i
          JOIN items t ON t.id=i.item_id
          WHERE i.session_id=?1 AND i.event_seq>=?2 AND i.event_seq<?3 AND i.mode='full'
          AND NOT EXISTS (SELECT 1 FROM auto_usage u WHERE u.session_id=i.session_id
@@ -201,24 +201,29 @@ pub fn record(
             r.get::<_, String>(2)?,
             r.get::<_, String>(3)?,
             r.get::<_, String>(4)?,
+            r.get::<_, String>(5)?,
         ))
     })?;
     let mut signals = Vec::new();
     for row in rows {
-        let (delivery, id, kind, scope, json) = row?;
+        let (delivery, id, kind, scope, json, via) = row?;
         let Ok(triggers) = serde_json::from_str::<Triggers>(&json) else {
             continue;
         };
-        let matched = triggers.paths.iter().any(|pattern| {
-            touches.paths.iter().any(|path| {
-                pattern
-                    .strip_suffix('*')
-                    .map_or(pattern == path, |prefix| path.starts_with(prefix))
-            })
-        }) || triggers.keywords.iter().any(|word| {
-            (identifier(word) && touches.identifiers.contains(word))
-                || (file_like(word) && touches.paths.iter().any(|path| path_ends_with(path, word)))
-        });
+        // A path touch proves use after a prompt delivery. For a path delivery,
+        // the same touch caused delivery and would be circular evidence.
+        let matched = (via == "prompt"
+            && triggers.paths.iter().any(|pattern| {
+                touches
+                    .paths
+                    .iter()
+                    .any(|path| crate::bench::elo_selector::path_matches(pattern, path))
+            }))
+            || triggers.keywords.iter().any(|word| {
+                (identifier(word) && touches.identifiers.contains(word))
+                    || (file_like(word)
+                        && touches.paths.iter().any(|path| path_ends_with(path, word)))
+            });
         if matched {
             signals.push((delivery, id, kind, scope));
         }
