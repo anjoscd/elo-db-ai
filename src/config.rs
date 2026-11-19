@@ -40,6 +40,8 @@ pub enum ConfigError {
     ShadowScoreRange(f64),
     #[error("workspace.min_score must be between 0 and 1, got {0}")]
     MinScoreRange(f64),
+    #[error("workspace.abstain_below must be between 0 and 1, got {0}")]
+    AbstainBelowRange(f64),
     #[error("workspace.full_min_score must be between 0 and 1, got {0}")]
     FullMinScoreRange(f64),
     #[error("quota `{name}` must be between 0 and 1, got {value}")]
@@ -153,6 +155,8 @@ pub struct Workspace {
     pub min_score: f64,
     /// Minimum score for full non-law delivery unless a touched path matches.
     pub full_min_score: f64,
+    /// Zero disables prompt abstention below the best non-law candidate score.
+    pub abstain_below: f64,
     pub index_over_bytes: u64,
     /// Zero removes the cap on full notes/decisions (they still need 2+ keywords or a path).
     pub full_notes_max: usize,
@@ -174,6 +178,7 @@ impl Default for Workspace {
             budget_bytes: DEFAULT_BUDGET_BYTES,
             min_score: DEFAULT_MIN_SCORE,
             full_min_score: DEFAULT_FULL_MIN_SCORE,
+            abstain_below: 0.0,
             index_over_bytes: 300,
             full_notes_max: 2,
             notes_budget_bytes: 1500,
@@ -256,6 +261,9 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.shadow.abstain_min_score) {
             return Err(ConfigError::ShadowScoreRange(self.shadow.abstain_min_score));
+        }
+        if !(0.0..=1.0).contains(&self.workspace.abstain_below) {
+            return Err(ConfigError::AbstainBelowRange(self.workspace.abstain_below));
         }
         self.quotas.validate()?;
         self.validate_projects()?;

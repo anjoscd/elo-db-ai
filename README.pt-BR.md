@@ -284,6 +284,8 @@ Nos prompts reais, decisões, regras e notas entregues completas em pelo menos `
 
 Itens que não são lei só vão completos com nota de pelo menos `[workspace] full_min_score = 0.6`, ou quando o agente está mexendo num dos seus caminhos de gatilho; fora isso vão como ponteiro. Notas e decisões também precisam de duas palavras-chave distintas do pedido atual. Aumente o valor para menos ruído ou diminua para mais itens completos. Cada entrega registra o motivo (`prompt` ou `path`): mexer num caminho de gatilho só conta como uso depois de uma entrega pelo pedido, e entregas pelo caminho nunca contam para o rebaixamento por desuso.
 
+Defina `[workspace] abstain_below = 0.6` para suprimir contexto não-lei quando a maior nota dos candidatos não-lei disparados pelo pedido (excluindo itens com arquivo tocado) ficar abaixo do limiar em pedidos reais. O padrão é `0.0` (desligado); leis mantêm suas regras habituais, itens com arquivo tocado e o quadro de trabalho continuam disponíveis, inclusive ponteiros de arquivos tocados; os demais ponteiros e avisos de omissão são suprimidos. A seleção de reserva para pedidos sem palavras ou só com imagem não passa pelo portão. A entrega pre-tool-use e os benchmarks não mudam. Calibre o limiar com `elo shadow calibrate`: a sombra usa a mesma nota e comparação, sem heurística de diferença entre notas, com `workspace.abstain_below` quando positivo ou `shadow.abstain_min_score` caso contrário; a sombra registra a decisão efetiva em `abstained` e `elo stats` mostra a porcentagem de pedidos com abstenção quando habilitada.
+
 
 ## Avaliação
 

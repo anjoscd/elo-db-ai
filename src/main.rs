@@ -822,6 +822,17 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
     let records = elo_ctx::shadow::read(&elo_ctx::store::data_dir(root));
     let (abstain, delivered, skipped) =
         elo_ctx::shadow::percentages(&records, chrono::Utc::now().timestamp(), since);
+    if config.workspace.abstain_below > 0.0 {
+        writeln!(
+            out,
+            "abstained {} of prompts",
+            pct(elo_ctx::shadow::abstained_percentage(
+                &records,
+                chrono::Utc::now().timestamp(),
+                since
+            ))
+        )?;
+    }
     writeln!(out, "shadow: would abstain {} of prompts", pct(abstain))?;
     writeln!(
         out,

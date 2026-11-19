@@ -152,8 +152,30 @@ fn parallel_events_of_one_session_keep_every_increment() {
 #[test]
 fn feedback_line_arrives_only_on_every_fifth_event_and_respects_budget() {
     let dir = support::workspace();
+    fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nfull_min_score = 0.0\n",
+    )
+    .unwrap();
+    support::ok(
+        dir.path(),
+        &[
+            "add",
+            "rule",
+            "--id",
+            "recent",
+            "--scope",
+            "global",
+            "--title",
+            "Work",
+            "--body",
+            "Check work.",
+            "--triggers",
+            "trabalhar",
+        ],
+    );
     const MARKER: &str =
-        "Call elo_feedback(session_id:\"f1\", used:[...], ignored:[...]) for these delivered ids:";
+        "Optional, one call: elo_feedback(session_id:\"f1\", used:[...], ignored:[...]) for these full items:";
     let ask = || -> String {
         let mut child = elo()
             .args(["hook", "user-prompt-submit", "--live"])
@@ -185,7 +207,7 @@ fn feedback_line_arrives_only_on_every_fifth_event_and_respects_budget() {
         .expect("event 5 asks");
     assert_eq!(
         line,
-        "Call elo_feedback(session_id:\"f1\", used:[...], ignored:[...]) for these delivered ids: [always]."
+        "Optional, one call: elo_feedback(session_id:\"f1\", used:[...], ignored:[...]) for these full items: [recent]."
     );
     // The line must be inside the <elo-...> envelope, before the closing tag.
     let last_line = rendered.lines().last().unwrap();
@@ -250,9 +272,35 @@ fn feedback_line_arrives_only_on_every_fifth_event_and_respects_budget() {
 }
 
 #[test]
-fn feedback_line_skips_first_event_and_sessions_without_prior_deliveries() {
+fn feedback_line_includes_current_event_and_skips_empty_sessions() {
     let dir = support::workspace();
-    fs::write(dir.path().join("elo.toml"), "[feedback]\nask_every = 1\n").unwrap();
+    fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nfull_min_score = 0.0\n",
+    )
+    .unwrap();
+    support::ok(
+        dir.path(),
+        &[
+            "add",
+            "rule",
+            "--id",
+            "recent",
+            "--scope",
+            "global",
+            "--title",
+            "Work",
+            "--body",
+            "Check work.",
+            "--triggers",
+            "trabalhar",
+        ],
+    );
+    fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nfull_min_score = 0.0\n[feedback]\nask_every = 1\n",
+    )
+    .unwrap();
     let ask = |session: &str| -> String {
         let mut child = elo()
             .args(["hook", "user-prompt-submit", "--live"])
@@ -272,13 +320,13 @@ fn feedback_line_skips_first_event_and_sessions_without_prior_deliveries() {
         assert!(out.status.success());
         String::from_utf8(out.stdout).unwrap()
     };
-    // Event 1 has no prior deliveries in the session, so it must not ask even with ask_every = 1.
+    // Current full items qualify even without prior deliveries.
     let out1 = ask("s-first");
-    assert!(!out1.contains("Call elo_feedback("), "{out1}");
+    assert!(out1.contains("Optional, one call: elo_feedback("), "{out1}");
     // Event 2 has event 1's delivery in the session, so it asks.
     let out2 = ask("s-first");
     assert!(
-        out2.contains("Call elo_feedback(session_id:\"s-first\""),
+        out2.contains("Optional, one call: elo_feedback(session_id:\"s-first\""),
         "{out2}"
     );
 
@@ -287,7 +335,10 @@ fn feedback_line_skips_first_event_and_sessions_without_prior_deliveries() {
         let first = ask(hostile);
         let second = ask(hostile);
         for text in [&first, &second] {
-            assert!(!text.contains("Call elo_feedback("), "{text}");
+            assert!(
+                !text.contains("Optional, one call: elo_feedback("),
+                "{text}"
+            );
             assert!(!text.contains("</elo-x>"), "{text}");
         }
     }
@@ -299,7 +350,10 @@ fn feedback_line_skips_first_event_and_sessions_without_prior_deliveries() {
         let out = send(&empty, ".", "trabalhar");
         assert!(out.status.success());
         let text = String::from_utf8(out.stdout).unwrap();
-        assert!(!text.contains("Call elo_feedback("), "{text}");
+        assert!(
+            !text.contains("Optional, one call: elo_feedback("),
+            "{text}"
+        );
     }
 }
 
@@ -445,6 +499,11 @@ fn shadow_stats_since_and_skipped_times_are_visible() {
         .unwrap()
         .status
         .success());
+    fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nabstain_below = 0.6\n",
+    )
+    .unwrap();
     let now = chrono::Utc::now();
     let at = |days| (now - chrono::Duration::days(days)).to_rfc3339();
     let records = [
@@ -458,7 +517,7 @@ fn shadow_stats_since_and_skipped_times_are_visible() {
         .map(|(seq, at, abstain)| {
             serde_json::json!({
                 "session_id":"stats", "event_seq":seq, "at":at, "top":0.2, "gap":0.1,
-                "matched_words":2, "would_abstain":abstain, "n_full_non_law":1,
+                "matched_words":2, "would_abstain":abstain, "abstained":abstain, "n_full_non_law":1,
                 "n_pointers":0, "used_bytes":10
             })
             .to_string()
@@ -488,6 +547,73 @@ fn shadow_stats_since_and_skipped_times_are_visible() {
             stdout.contains(&format!("shadow: would abstain {expected} of prompts")),
             "{stdout}"
         );
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line == format!("abstained {expected} of prompts")),
+            "{stdout}"
+        );
         assert!(stdout.contains("2 shadow records skipped: invalid or future time"));
     }
+}
+
+#[test]
+fn feedback_history_filters_modes_kinds_window_and_session_and_limits_to_five() {
+    let dir = support::workspace();
+    fs::write(dir.path().join("elo.toml"), "[feedback]\nask_every = 1\n").unwrap();
+    let conn = rusqlite::Connection::open(dir.path().join(".elo/elo.db")).unwrap();
+    // Event 1 includes the previous 39 events, even when their item is no longer active.
+    for (session, seq, id, mode, kind) in [
+        ("history", 0, "pointer", "pointer", "rule"),
+        ("history", 0, "law", "full", "law"),
+        ("other", 0, "foreign", "full", "rule"),
+        ("history", -39, "stale", "full", "rule"),
+    ] {
+        conn.execute(
+            "INSERT INTO injections (session_id,event_seq,item_id,mode,kind,scope,at) VALUES (?1, ?2, ?3, ?4, ?5, 'global', 0)",
+            rusqlite::params![session, seq, id, mode, kind],
+        )
+        .unwrap();
+    }
+    let ask = || {
+        let mut child = elo()
+            .args(["hook", "user-prompt-submit", "--live"])
+            .current_dir(dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let input = serde_json::json!({"session_id":"history", "cwd":dir.path(), "prompt":"work"});
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    assert!(!ask().contains("Optional, one call:"));
+    for (seq, id) in [
+        (-37, "boundary"),
+        (-5, "old"),
+        (-4, "e"),
+        (-3, "d"),
+        (-2, "c"),
+        (-1, "b"),
+        (0, "a"),
+    ] {
+        conn.execute(
+            "INSERT INTO injections (session_id,event_seq,item_id,mode,kind,scope,at) VALUES ('history', ?1, ?2, 'full', 'rule', 'global', 0)",
+            rusqlite::params![seq, id],
+        )
+        .unwrap();
+    }
+    let output = ask();
+    let line = output
+        .lines()
+        .find(|line| line.starts_with("Optional, one call:"))
+        .unwrap();
+    assert_eq!(line, "Optional, one call: elo_feedback(session_id:\"history\", used:[...], ignored:[...]) for these full items: [a, b, c, d, e].");
 }

@@ -452,14 +452,19 @@ fn agent_feedback_tool_accepts_only_recent_deliveries() {
 #[test]
 fn end_to_end_hook_feedback_line_accepted_by_mcp() {
     let dir = workspace();
+    std::fs::write(
+        dir.path().join("elo.toml"),
+        "[workspace]\nfull_min_score = 0.0\nmin_score = 0.0\n",
+    )
+    .unwrap();
     // The line only asks about items already delivered in the session, so the store needs one.
     let added = Command::new(env!("CARGO_BIN_EXE_elo"))
         .args([
             "add",
-            "law",
+            "rule",
             "--as-user",
             "--id",
-            "law-base",
+            "rule-base",
             "--scope",
             "global",
             "--title",
@@ -467,7 +472,7 @@ fn end_to_end_hook_feedback_line_accepted_by_mcp() {
             "--body",
             "Always preserve user data.",
             "--triggers",
-            "help",
+            "trabalhar",
         ])
         .current_dir(dir.path())
         .output()
@@ -481,7 +486,7 @@ fn end_to_end_hook_feedback_line_accepted_by_mcp() {
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        let input = json!({"session_id":"e2e-sess","cwd":dir.path(),"prompt":"help"});
+        let input = json!({"session_id":"e2e-sess","cwd":dir.path(),"prompt":"trabalhar"});
         child
             .stdin
             .take()
@@ -498,15 +503,15 @@ fn end_to_end_hook_feedback_line_accepted_by_mcp() {
     let out5 = run_hook();
     let line = out5
         .lines()
-        .find(|l| l.starts_with("Call elo_feedback("))
+        .find(|l| l.starts_with("Optional, one call: elo_feedback("))
         .expect("feedback line on event 5");
     let sid = line
-        .strip_prefix("Call elo_feedback(session_id:\"")
+        .strip_prefix("Optional, one call: elo_feedback(session_id:\"")
         .and_then(|s| s.split_once('"'))
         .map(|(s, _)| s)
         .expect("session_id in feedback line");
     let ids_part = line
-        .rsplit_once("for these delivered ids: [")
+        .rsplit_once("for these full items: [")
         .and_then(|(_, rest)| rest.strip_suffix("]."))
         .expect("delivered ids list");
     let delivered: Vec<String> = ids_part
@@ -515,14 +520,14 @@ fn end_to_end_hook_feedback_line_accepted_by_mcp() {
         .filter(|s| !s.is_empty())
         .collect();
     assert_eq!(sid, "e2e-sess");
-    assert_eq!(delivered, vec!["law-base".to_string()]);
+    assert_eq!(delivered, vec!["rule-base".to_string()]);
 
     let mut mcp = Session::new(dir.path(), None);
     let resp = mcp.tool(
         "elo_feedback",
         json!({"session_id": sid, "used": delivered, "ignored": []}),
     );
-    assert_eq!(content(&resp), "accepted: law-base; rejected: ");
+    assert_eq!(content(&resp), "accepted: rule-base; rejected: ");
     mcp.close();
 }
 

@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.5]
+
+### Added
+
+- Optional abstention gate, `[workspace] abstain_below` (default `0.0`, off). In real prompts, when the best non-law candidate triggered by the prompt scores below the threshold, the envelope keeps only laws and items whose trigger path the agent is touching; other full items, pointers and omission notices are dropped. Path-triggered items do not count towards the score, prompts without words (for example image-only) keep their project fallback, and file-triggered delivery before a tool call is unchanged. `elo stats` shows the abstention rate when the gate is on.
+
+### Changed
+
+- The shadow log uses the same score and threshold as the gate (`abstain_below` when set, otherwise `shadow.abstain_min_score`) and records whether the gate actually abstained, so `elo shadow calibrate` predicts exactly what the gate will do. The previous small-gap heuristic was removed.
+- The feedback request line lists only items delivered in full that are not laws (at most five, most recent first), names the exact tool and states it is a single optional call.
+
 ## [0.3.4]
 
 ### Changed

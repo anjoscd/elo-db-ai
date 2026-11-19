@@ -927,7 +927,8 @@ impl Selector for E1 {
                 inserted += 1;
             }
         }
-        if real_prompt && ev.prompt.is_some() && words == 0 && !matched {
+        let fallback = real_prompt && ev.prompt.is_some() && words == 0 && !matched;
+        if fallback {
             if let Some(primary) = &scope.primary {
                 let project = format!("project:{primary}");
                 let mut candidates: Vec<_> = fx
@@ -1029,19 +1030,49 @@ impl Selector for E1 {
             let excess = state.recent_prompts.len().saturating_sub(2);
             state.recent_prompts.drain(..excess);
         }
+        let path_hit = |item: &Item| {
+            item.triggers
+                .paths
+                .iter()
+                .any(|p| touched.iter().any(|t| path_matches(p, t)))
+        };
+        // Path scores and always-only rules are not evidence from the prompt.
+        let mut candidates = scored
+            .iter()
+            .filter(|(_, item)| !path_hit(item) && keyword_matches(item, &matching_text) > 0);
+        let best = candidates.next();
+        let top = best.map_or(0.0, |(score, _)| *score);
+        let second = candidates.next().map_or(0.0, |(score, _)| *score);
+        let minimum = if fx.config.workspace.abstain_below > 0.0 {
+            fx.config.workspace.abstain_below
+        } else {
+            fx.config.shadow.abstain_min_score
+        };
+        let mut decision = crate::shadow::ShadowDecision::new(
+            top,
+            top - second,
+            best.map_or(0, |(_, item)| keyword_matches(item, &matching_text)),
+            minimum,
+        );
+        decision.would_abstain &= !fallback;
+        let abstained =
+            real_prompt && fx.config.workspace.abstain_below > 0.0 && decision.would_abstain;
+        if abstained {
+            selection.full_ids.retain(|id| {
+                fx.items
+                    .iter()
+                    .any(|item| &item.id == id && (item.kind == Kind::Law || path_hit(item)))
+            });
+            selection
+                .pointer_ids
+                .retain(|id| fx.items.iter().any(|item| &item.id == id && path_hit(item)));
+            selection.omitted_notes.clear();
+            selection.omitted_pointers = 0;
+        }
         trim_pointers_to_budget(fx, ev, &mut selection);
         if real_prompt && fx.config.shadow.enabled {
-            let mut candidates = scored.iter().filter(|(_, item)| item.kind != Kind::Law);
-            let best = candidates.next();
-            let top = best.map_or(0.0, |(score, _)| *score);
-            let second = candidates.next().map_or(0.0, |(score, _)| *score);
-            let matched_words = best.map_or(0, |(_, item)| keyword_matches(item, &matching_text));
-            selection.shadow = Some(crate::shadow::ShadowDecision::new(
-                top,
-                top - second,
-                matched_words,
-                fx.config.shadow.abstain_min_score,
-            ));
+            decision.abstained = abstained;
+            selection.shadow = Some(decision);
         }
         selection.path_ids = fx
             .items
@@ -1063,6 +1094,124 @@ impl Selector for E1 {
 #[cfg(test)]
 mod tests {
     use super::{has_word, prose, safe_relative, under};
+
+    #[test]
+    fn abstention_preserves_laws_paths_and_legacy_events() {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.items[0].kind = Kind::Law;
+        fx.items[1].kind = Kind::Rule;
+        fx.items[1].triggers.paths = vec!["src/*".into()];
+        fx.config.workspace.full_min_score = 0.0;
+        let select = |fx: &Fixture, ev: &Event| E1.select(fx, ev, &mut SessionState::default());
+        let baseline = select(&fx, &ev);
+        assert!(!baseline.shadow.as_ref().unwrap().abstained);
+        fx.config.workspace.abstain_below = 1.0;
+        let gated = select(&fx, &ev);
+        assert_eq!(gated.full_ids, ["note-0"]);
+        assert!(gated.pointer_ids.is_empty());
+        assert!(gated.omitted_notes.is_empty());
+        assert_eq!(gated.omitted_pointers, 0);
+        assert_eq!(gated.used_bytes, render(&fx, &ev, &gated).len());
+        assert!(gated.shadow.as_ref().unwrap().abstained);
+        assert_eq!(
+            baseline.shadow.as_ref().unwrap().top,
+            gated.shadow.as_ref().unwrap().top
+        );
+        let mut state = SessionState::default();
+        state.touched.push(("src/main.rs".into(), ev.event_seq));
+        let paths = E1.select(&fx, &ev, &mut state);
+        assert!(paths.shadow.unwrap().abstained);
+        assert!(paths.full_ids.contains(&"note-1".into()));
+        assert!(paths.path_ids.contains(&"note-1".into()));
+        fx.config.workspace.abstain_below = baseline.shadow.as_ref().unwrap().top;
+        let boundary = select(&fx, &ev);
+        assert!(!boundary.shadow.as_ref().unwrap().abstained);
+        assert!(!boundary.shadow.as_ref().unwrap().would_abstain);
+        assert_eq!(render(&fx, &ev, &baseline), render(&fx, &ev, &boundary));
+        fx.config.shadow.abstain_min_score = 1.0;
+        fx.config.workspace.abstain_below = 0.01;
+        assert!(!select(&fx, &ev).shadow.unwrap().would_abstain);
+        assert_eq!(
+            render(&fx, &ev, &baseline),
+            render(&fx, &ev, &select(&fx, &ev))
+        );
+        for benchmark in [false, true] {
+            ev.event_type = if benchmark {
+                "user-prompt-submit"
+            } else {
+                "pre-tool-use"
+            }
+            .into();
+            if benchmark {
+                ev.allowed_scopes.push("global".into());
+            }
+            fx.config.workspace.abstain_below = 0.0;
+            let before = select(&fx, &ev);
+            fx.config.workspace.abstain_below = 1.0;
+            assert_eq!(
+                render(&fx, &ev, &before),
+                render(&fx, &ev, &select(&fx, &ev))
+            );
+        }
+        ev.allowed_scopes.clear();
+        fx.items.retain(|item| item.kind != Kind::Law);
+        assert!(render(&fx, &ev, &select(&fx, &ev)).is_empty());
+        fx.config.shadow.enabled = false;
+        assert!(render(&fx, &ev, &select(&fx, &ev)).is_empty());
+    }
+
+    #[test]
+    fn recent_path_does_not_mask_weak_prompt_and_keeps_its_pointer() {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.items[0].kind = Kind::Law;
+        fx.items[1].kind = Kind::Rule;
+        fx.items[1].triggers.paths = vec!["src/*".into()];
+        fx.config.workspace.full_min_score = 0.0;
+        fx.config.workspace.abstain_below = 0.6;
+        fx.config.shadow.abstain_min_score = 0.1;
+        ev.event_seq = 10;
+        for large_body in [false, true] {
+            fx.config.workspace.budget_bytes = 1500;
+            if large_body {
+                fx.items[1].body = "x".repeat(5000);
+            }
+            let mut state = SessionState::default();
+            state.touched.push(("src/main.rs".into(), 7));
+            let sel = E1.select(&fx, &ev, &mut state);
+            let shadow = sel.shadow.as_ref().unwrap();
+            assert!(shadow.top < 0.6);
+            assert!(shadow.abstained && shadow.would_abstain);
+            assert!(sel.full_ids.contains(&"note-0".into()));
+            if large_body {
+                assert_eq!(sel.full_ids, ["note-0"]);
+                assert_eq!(sel.pointer_ids, ["note-1"]);
+            } else {
+                assert_eq!(sel.full_ids.len(), 2);
+                assert!(sel.full_ids.contains(&"note-1".into()));
+                assert!(sel.pointer_ids.is_empty());
+            }
+            assert!(sel.omitted_notes.is_empty());
+            assert_eq!(sel.omitted_pointers, 0);
+            assert!(render(&fx, &ev, &sel).len() <= 1500);
+        }
+    }
+
+    #[test]
+    fn wordless_fallback_bypasses_both_actual_and_shadow_abstention() {
+        let (mut fx, mut ev) = fallback_fixture(3);
+        for prompt in ["", "[Image: source: /tmp/picture.png]", "..."] {
+            ev.prompt = Some(prompt.into());
+            fx.config.workspace.abstain_below = 0.0;
+            let baseline = E1.select(&fx, &ev, &mut SessionState::default());
+            assert!(!baseline.pointer_ids.is_empty());
+            fx.config.workspace.abstain_below = 0.9;
+            let gated = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(render(&fx, &ev, &baseline), render(&fx, &ev, &gated));
+            let shadow = gated.shadow.unwrap();
+            assert_eq!(shadow.top, 0.0);
+            assert!(!shadow.abstained && !shadow.would_abstain);
+        }
+    }
 
     #[test]
     fn shadow_preserves_delivery_and_only_observes_real_prompts() {

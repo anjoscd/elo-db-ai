@@ -9,7 +9,7 @@ use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 
 use crate::bench::elo_selector::E1;
-use crate::bench::fixture::{Event, Item, Status};
+use crate::bench::fixture::{Event, Item, Kind, Status};
 use crate::bench::selector::{render, Selector, SessionState};
 use crate::config::Config;
 use crate::discover::{discover, to_toml};
@@ -654,39 +654,40 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
             && session.seq.is_multiple_of(config.feedback.ask_every)
         {
             let prior = prior_session_deliveries(&store, &input.session_id, seq, 40)?;
-            if !prior.is_empty() {
-                let mut delivered: Vec<String> = Vec::new();
-                for id in selection
-                    .full_ids
-                    .iter()
-                    .chain(&selection.pointer_ids)
-                    .chain(&prior)
-                {
-                    if !delivered.contains(id) {
-                        delivered.push(id.clone());
-                        if delivered.len() == 20 {
-                            break;
-                        }
+            let mut delivered: Vec<String> = Vec::new();
+            for id in selection
+                .full_ids
+                .iter()
+                .filter(|id| {
+                    fx.items
+                        .iter()
+                        .any(|item| item.id == **id && item.kind != Kind::Law)
+                })
+                .chain(&prior)
+            {
+                if !delivered.contains(id) {
+                    delivered.push(id.clone());
+                    if delivered.len() == 5 {
+                        break;
                     }
                 }
-                // The session id comes from the harness and is echoed into the envelope: only an
-                // opaque token (ASCII letters, digits, '-', '_', '.', ':' up to 128 chars) is
-                // allowed, so a hostile id can never break the line or close the envelope.
-                let sid_ok = !input.session_id.is_empty()
-                    && input.session_id.len() <= 128
-                    && input
-                        .session_id
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
-                if !delivered.is_empty() && sid_ok {
-                    let ids_text = delivered.join(", ");
-                    let sid = &input.session_id;
-                    selection.feedback_line = Some(format!(
-                        "Call elo_feedback(session_id:\"{sid}\", used:[...], ignored:[...]) for these delivered ids: [{ids_text}]."
-                    ));
-                }
+            }
+            // Only opaque session tokens may be echoed into the envelope.
+            let sid_ok = !input.session_id.is_empty()
+                && input.session_id.len() <= 128
+                && input
+                    .session_id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
+            if !delivered.is_empty() && sid_ok {
+                let ids_text = delivered.join(", ");
+                let sid = &input.session_id;
+                selection.feedback_line = Some(format!(
+                    "Optional, one call: elo_feedback(session_id:\"{sid}\", used:[...], ignored:[...]) for these full items: [{ids_text}]."
+                ));
             }
         }
+
         let mut rendered = render(&fx, &ev, &selection);
         if selection.feedback_line.is_some()
             && rendered.len() > config.workspace.budget_bytes as usize
@@ -804,7 +805,7 @@ fn prior_session_deliveries(
         .conn
         .prepare(
             "SELECT item_id, MAX(event_seq) AS last_seq FROM injections \
-             WHERE session_id = ?1 AND event_seq >= ?2 AND event_seq < ?3 \
+             WHERE session_id = ?1 AND event_seq >= ?2 AND event_seq < ?3 AND mode = 'full' AND kind != 'law' \
              GROUP BY item_id ORDER BY last_seq DESC, item_id",
         )
         .map_err(|e| e.to_string())?;

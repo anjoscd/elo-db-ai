@@ -284,6 +284,8 @@ In real prompts, decisions, rules and notes delivered in full in at least `[work
 
 Non-law items go in full only with a score of at least `[workspace] full_min_score = 0.6`, or when the agent is touching one of their trigger paths; otherwise they are pointers. Notes and decisions also need two distinct keywords from the current prompt. Raise the value for less noise or lower it for more full items. Each delivery records why it happened (`prompt` or `path`): touching a trigger path counts as usage only after a prompt delivery, and path deliveries never count towards unused demotion.
 
+Set `[workspace] abstain_below = 0.6` to suppress non-law context when the best prompt-triggered non-law candidate (excluding touched-path items) scores below that threshold on real user prompts. It defaults to `0.0` (disabled); laws retain their usual delivery rules, touched-path items and the work board remain available, including touched-path pointers; other pointers and omission notices are suppressed when abstaining. Wordless/image-only fallback selection bypasses the gate. Pre-tool-use delivery and benchmarks are unchanged. Calibrate the threshold with `elo shadow calibrate`: shadow uses the same score and comparison, without a gap heuristic, and uses `workspace.abstain_below` when positive or `shadow.abstain_min_score` otherwise; shadow telemetry records actual `abstained` decisions and `elo stats` reports the abstained prompt percentage when enabled.
+
 
 ## Evaluation
 

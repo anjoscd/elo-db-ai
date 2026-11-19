@@ -20,6 +20,8 @@ pub struct ShadowDecision {
     pub gap: f64,
     pub matched_words: usize,
     pub would_abstain: bool,
+    #[serde(default)]
+    pub abstained: bool,
 }
 
 impl ShadowDecision {
@@ -27,8 +29,9 @@ impl ShadowDecision {
         Self {
             top,
             gap,
+            abstained: false,
             matched_words,
-            would_abstain: top < minimum || (gap < 0.05 && matched_words < 2),
+            would_abstain: top < minimum,
         }
     }
 }
@@ -180,6 +183,22 @@ pub fn percentages(
     )
 }
 
+/// Actual abstention among unique prompts in the requested reporting window.
+pub fn abstained_percentage(records: &[Record], now: i64, since: Option<i64>) -> Option<f64> {
+    let recent: Vec<_> = latest(records)
+        .into_iter()
+        .filter(|r| {
+            chrono::DateTime::parse_from_rfc3339(&r.at).is_ok_and(|at| {
+                at.timestamp() <= now && at.timestamp() >= since.unwrap_or(now - 30 * 86_400)
+            })
+        })
+        .collect();
+    ratio(
+        recent.iter().filter(|r| r.decision.abstained).count(),
+        recent.len(),
+    )
+}
+
 fn ratio(n: usize, total: usize) -> Option<f64> {
     (total > 0).then(|| n as f64 / total as f64)
 }
@@ -269,6 +288,39 @@ mod tests {
     }
 
     #[test]
+    fn actual_abstention_round_trips_and_old_records_default_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut row = sample(0.2, 1);
+        row.decision.abstained = true;
+        append(dir.path(), &row).unwrap();
+        let rows = read(dir.path());
+        assert!(rows[0].decision.abstained);
+        let now = chrono::DateTime::parse_from_rfc3339(&row.at)
+            .unwrap()
+            .timestamp();
+        assert_eq!(abstained_percentage(&rows, now, None), Some(1.0));
+        assert_eq!(abstained_percentage(&rows, now + 31 * 86400, None), None);
+        let mut json = serde_json::to_value(&row).unwrap();
+        json.as_object_mut().unwrap().remove("abstained");
+        let mut old: Record = serde_json::from_value(json).unwrap();
+        old.event_seq += 1;
+        assert!(!old.decision.abstained);
+        assert_eq!(abstained_percentage(&[row, old], now, None), Some(0.5));
+    }
+
+    #[test]
+    fn workspace_abstention_configuration_range() {
+        let parse = |text: &str| crate::config::Config::parse(text, Path::new("test.toml"));
+        assert_eq!(parse("").unwrap().workspace.abstain_below, 0.0);
+        for value in ["-0.1", "1.1", "nan", "inf"] {
+            assert!(parse(&format!("[workspace]\nabstain_below={value}")).is_err());
+        }
+        for value in ["0.0", "0.6", "1.0"] {
+            assert!(parse(&format!("[workspace]\nabstain_below={value}")).is_ok());
+        }
+    }
+
+    #[test]
     fn append_latency_100_calls() {
         let dir = tempfile::tempdir().unwrap();
         let mut times = Vec::new();
@@ -326,7 +378,7 @@ mod tests {
 
     #[test]
     fn config_defaults_override_and_validation() {
-        let parse = |text| crate::config::Config::parse(text, Path::new("test.toml"));
+        let parse = |text: &str| crate::config::Config::parse(text, Path::new("test.toml"));
         let default = parse("").unwrap().shadow;
         assert!(default.enabled);
         assert_eq!(default.abstain_min_score, 0.6);
@@ -343,7 +395,7 @@ mod tests {
     fn decision_threshold_and_ambiguity() {
         assert!(ShadowDecision::new(0.2, 0.2, 2, 0.55).would_abstain);
         assert!(!ShadowDecision::new(0.9, 0.1, 2, 0.55).would_abstain);
-        assert!(ShadowDecision::new(0.9, 0.01, 1, 0.55).would_abstain);
+        assert!(!ShadowDecision::new(0.9, 0.01, 1, 0.55).would_abstain);
         assert!(!ShadowDecision::new(0.9, 0.01, 2, 0.55).would_abstain);
     }
 
@@ -354,7 +406,8 @@ mod tests {
         let path = dir.path().join("shadow/selector.jsonl");
         let line = fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 10);
+        assert_eq!(json.as_object().unwrap().len(), 11);
+        assert_eq!(json["abstained"], false);
         for field in ["prompt", "title", "body", "full_ids", "rendered"] {
             assert!(json.get(field).is_none());
         }
