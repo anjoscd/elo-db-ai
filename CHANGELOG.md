@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.6]
+
+### Changed
+
+- Global decisions and rules can now be delivered in full. Their proximity weight capped them at about 0.58, below `full_min_score` (0.6), so they were only ever pointers and the abstention gate closed on almost every prompt outside a project. In real prompts a global item with a specific match now uses the same proximity as another project's item (0.5): two or more distinct keywords from the current prompt, or one single-word keyword that is rare among non-note items (normalized idf of at least 0.65, decisions included) and reads like a name: capitalised mid-sentence at least as often as in lower case across item titles and bodies outside code, or with a digit or hyphen. Function words never count. At most two global items per prompt are promoted this way, chosen by score before any layer is packed; the others keep their plain score. On 289 real prompts that the gate had cut, 28 now get a non-law item in full instead of 0. Hook latency is unchanged: the name check scans only the few rare words present in the prompt.
+- Notes are no longer delivered from the prompt in real use, neither in full nor as pointers (0% measured use); a touched trigger path still delivers them, and `elo recall` and `elo context` still find them. The `+N notes (elo recall ...)` line is gone.
+- Pointers in real use: at most three per prompt, and each item is pointed at most once per session (until a compaction or session start).
+- The hook no longer prints the feedback request line (no reports in four days after 0.3.5). The `elo_feedback` MCP tool is unchanged; `[feedback] ask_every` is accepted but unused.
+- Benchmark mode is unchanged.
+
 ## [0.3.5]
 
 ### Added

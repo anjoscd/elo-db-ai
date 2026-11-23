@@ -150,7 +150,7 @@ fn parallel_events_of_one_session_keep_every_increment() {
 }
 
 #[test]
-fn feedback_line_arrives_only_on_every_fifth_event_and_respects_budget() {
+fn feedback_line_is_never_emitted_on_the_configured_cadence() {
     let dir = support::workspace();
     fs::write(
         dir.path().join("elo.toml"),
@@ -195,84 +195,14 @@ fn feedback_line_arrives_only_on_every_fifth_event_and_respects_budget() {
         assert!(out.status.success());
         String::from_utf8(out.stdout).unwrap()
     };
-    // Default ask_every = 5: the request line comes on multiples of 5 inside the <elo-...> envelope.
-    for i in 1..=4u32 {
-        assert!(!ask().contains(MARKER), "event {i} must not ask yet");
-    }
-    let out5 = ask();
-    let rendered = out5.strip_suffix('\n').unwrap();
-    let line = rendered
-        .lines()
-        .find(|l| l.starts_with(MARKER))
-        .expect("event 5 asks");
-    assert_eq!(
-        line,
-        "Optional, one call: elo_feedback(session_id:\"f1\", used:[...], ignored:[...]) for these full items: [recent]."
-    );
-    // The line must be inside the <elo-...> envelope, before the closing tag.
-    let last_line = rendered.lines().last().unwrap();
-    assert!(
-        last_line.starts_with("</elo-"),
-        "closing tag must be the last line: {rendered}"
-    );
-    let expected_bytes = rendered.len() as u64;
-    assert!(
-        rendered
-            .lines()
-            .next()
-            .unwrap()
-            .contains(&format!("used=\"{expected_bytes}\"")),
-        "header used attribute must match full rendered bytes: {rendered}"
-    );
-    let conn = rusqlite::Connection::open(dir.path().join(".elo/elo.db")).unwrap();
-    let db_bytes: i64 = conn
-        .query_row(
-            "SELECT used_bytes FROM injected_events WHERE session_id='f1' AND event_seq=5",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(db_bytes as u64, expected_bytes);
-    let shadow_records = elo_ctx::shadow::read(&dir.path().join(".elo"));
-    let sel5 = shadow_records
-        .iter()
-        .find(|r| r.session_id == "f1" && r.event_seq == 5)
-        .unwrap();
-    assert_eq!(sel5.used_bytes as u64, expected_bytes);
-    let log_text = fs::read_to_string(dir.path().join(".elo/shadow/log.jsonl")).unwrap();
-    let log5: serde_json::Value = log_text
-        .lines()
-        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
-        .find(|v| v["session_id"] == "f1" && v["event_seq"] == 5)
-        .unwrap();
-    assert_eq!(log5["used_bytes"].as_u64().unwrap(), expected_bytes);
-
-    assert!(!ask().contains(MARKER), "event 6 must not ask");
-    for i in 7..=9u32 {
+    // The hook stays silent about feedback even on the configured cadence.
+    for i in 1..=15 {
         assert!(!ask().contains(MARKER), "event {i} must not ask");
-    }
-    // A budget one byte smaller than the rendered envelope drops the line.
-    fs::write(
-        dir.path().join("elo.toml"),
-        format!("[workspace]\nbudget_bytes = {}\n", expected_bytes - 1),
-    )
-    .expect("config");
-    assert!(
-        !ask().contains(MARKER),
-        "event 10 without room must not ask"
-    );
-    // ask_every = 0 turns the request off entirely.
-    fs::write(dir.path().join("elo.toml"), "[feedback]\nask_every = 0\n").expect("config");
-    for i in 11..=15u32 {
-        assert!(
-            !ask().contains(MARKER),
-            "event {i} with ask_every=0 must not ask"
-        );
     }
 }
 
 #[test]
-fn feedback_line_includes_current_event_and_skips_empty_sessions() {
+fn feedback_line_is_absent_with_current_prior_and_empty_deliveries() {
     let dir = support::workspace();
     fs::write(
         dir.path().join("elo.toml"),
@@ -320,13 +250,16 @@ fn feedback_line_includes_current_event_and_skips_empty_sessions() {
         assert!(out.status.success());
         String::from_utf8(out.stdout).unwrap()
     };
-    // Current full items qualify even without prior deliveries.
+    // Current full items do not cause a feedback request.
     let out1 = ask("s-first");
-    assert!(out1.contains("Optional, one call: elo_feedback("), "{out1}");
-    // Event 2 has event 1's delivery in the session, so it asks.
+    assert!(
+        !out1.contains("Optional, one call: elo_feedback("),
+        "{out1}"
+    );
+    // Prior deliveries do not cause a feedback request either.
     let out2 = ask("s-first");
     assert!(
-        out2.contains("Optional, one call: elo_feedback(session_id:\"s-first\""),
+        !out2.contains("Optional, one call: elo_feedback(session_id:\"s-first\""),
         "{out2}"
     );
 
@@ -558,7 +491,7 @@ fn shadow_stats_since_and_skipped_times_are_visible() {
 }
 
 #[test]
-fn feedback_history_filters_modes_kinds_window_and_session_and_limits_to_five() {
+fn feedback_history_does_not_trigger_a_hook_request() {
     let dir = support::workspace();
     fs::write(dir.path().join("elo.toml"), "[feedback]\nask_every = 1\n").unwrap();
     let conn = rusqlite::Connection::open(dir.path().join(".elo/elo.db")).unwrap();
@@ -611,9 +544,5 @@ fn feedback_history_filters_modes_kinds_window_and_session_and_limits_to_five() 
         .unwrap();
     }
     let output = ask();
-    let line = output
-        .lines()
-        .find(|line| line.starts_with("Optional, one call:"))
-        .unwrap();
-    assert_eq!(line, "Optional, one call: elo_feedback(session_id:\"history\", used:[...], ignored:[...]) for these full items: [a, b, c, d, e].");
+    assert!(!output.contains("Optional, one call:"));
 }

@@ -62,7 +62,7 @@ fn recipe_add_list_and_delivery_by_keyword() {
 }
 
 #[test]
-fn recipe_is_delivered_by_its_keyword_and_titles_are_handled() {
+fn recipe_stays_in_recall_without_automatic_keyword_delivery() {
     let dir = TempDir::new().unwrap();
     elo(dir.path(), &["init"]);
     elo(
@@ -80,7 +80,7 @@ fn recipe_is_delivered_by_its_keyword_and_titles_are_handled() {
             "--as-user",
         ],
     );
-    // Delivered by the keyword, through the prompt hook.
+    // Recipes are notes: a prompt keyword alone does not deliver them.
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_elo"))
         .args(["hook", "user-prompt-submit", "--live"])
         .current_dir(dir.path())
@@ -98,7 +98,9 @@ fn recipe_is_delivered_by_its_keyword_and_titles_are_handled() {
         .write_all(body.to_string().as_bytes())
         .unwrap();
     let out = String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned();
-    assert!(out.contains("receita-copilot-com-ferramentas"), "{out}");
+    assert!(!out.contains("receita-copilot-com-ferramentas"), "{out}");
+    let (ok, recalled) = elo(dir.path(), &["recall", "copilot"]);
+    assert!(ok && recalled.contains("receita-copilot-com-ferramentas"));
     // Same title again: clear refusal. Symbols-only title: still gets an id.
     let (ok, _) = elo(
         dir.path(),

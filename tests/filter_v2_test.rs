@@ -467,11 +467,11 @@ fn unused_demotion_only_applies_to_eligible_kinds_in_real_mode() {
             let sel = E1.select(&fx, &ev, &mut SessionState::default());
             assert_eq!(
                 sel.pointer_ids.contains(&"r".into()),
-                expected && kind != Kind::Law
+                expected && kind != Kind::Law && (benchmark || kind != Kind::Note)
             );
             assert_eq!(
                 sel.full_ids.contains(&"r".into()),
-                !expected || kind == Kind::Law
+                (!expected || kind == Kind::Law) && (benchmark || kind != Kind::Note)
             );
         }
     }

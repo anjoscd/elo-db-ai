@@ -282,7 +282,12 @@ fn hook_delivers_future_expiry_and_never_re_emits_filtered_ids() {
     fs::write(dir.path().join("api/package.json"), "{}").expect("manifest");
     let mut s = Store::create(dir.path()).expect("open");
     let now = chrono::Utc::now().timestamp();
-    let mut e = entry("note", "global", "futuro", "zebrafutura always relevant");
+    let mut e = entry(
+        "decision",
+        "global",
+        "futuro",
+        "zebrafutura always relevant",
+    );
     e.id = Some("futuro".into());
     e.triggers = vec!["zebrafutura".into()];
     e.importance = 1.0;
@@ -445,13 +450,13 @@ fn hook_never_delivers_superseded_expired_or_archived() {
         ("exp", "zebragama"),
         ("arq", "zebradelta"),
     ] {
-        let mut e = entry("note", "global", id, &format!("{word} always relevant"));
+        let mut e = entry("decision", "global", id, &format!("{word} always relevant"));
         e.id = Some(id.into());
         e.triggers = vec![word.into()];
         e.importance = 1.0;
         add_at(&mut s, &e, now).expect("add");
     }
-    let mut next = entry("note", "global", "next", "substituta zebrabeta");
+    let mut next = entry("decision", "global", "next", "substituta zebrabeta");
     next.id = Some("next".into());
     next.triggers = vec!["zebrabeta".into()];
     next.supersedes = Some("sup".into());

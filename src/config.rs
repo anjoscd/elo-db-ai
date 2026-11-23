@@ -93,7 +93,8 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Feedback {
-    /// Ask for feedback every N events (0 disables it).
+    /// No longer used: the hook stopped printing the feedback request line in 0.3.6.
+    /// Kept so existing `elo.toml` files still parse.
     pub ask_every: u64,
 }
 

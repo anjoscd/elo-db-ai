@@ -450,14 +450,14 @@ fn agent_feedback_tool_accepts_only_recent_deliveries() {
 }
 
 #[test]
-fn end_to_end_hook_feedback_line_accepted_by_mcp() {
+fn feedback_mcp_remains_available_without_hook_request() {
     let dir = workspace();
     std::fs::write(
         dir.path().join("elo.toml"),
         "[workspace]\nfull_min_score = 0.0\nmin_score = 0.0\n",
     )
     .unwrap();
-    // The line only asks about items already delivered in the session, so the store needs one.
+    // Feedback still accepts items delivered by the hook.
     let added = Command::new(env!("CARGO_BIN_EXE_elo"))
         .args([
             "add",
@@ -501,26 +501,9 @@ fn end_to_end_hook_feedback_line_accepted_by_mcp() {
         run_hook();
     }
     let out5 = run_hook();
-    let line = out5
-        .lines()
-        .find(|l| l.starts_with("Optional, one call: elo_feedback("))
-        .expect("feedback line on event 5");
-    let sid = line
-        .strip_prefix("Optional, one call: elo_feedback(session_id:\"")
-        .and_then(|s| s.split_once('"'))
-        .map(|(s, _)| s)
-        .expect("session_id in feedback line");
-    let ids_part = line
-        .rsplit_once("for these full items: [")
-        .and_then(|(_, rest)| rest.strip_suffix("]."))
-        .expect("delivered ids list");
-    let delivered: Vec<String> = ids_part
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    assert_eq!(sid, "e2e-sess");
-    assert_eq!(delivered, vec!["rule-base".to_string()]);
+    assert!(!out5.contains("Optional, one call: elo_feedback("));
+    let sid = "e2e-sess";
+    let delivered = vec!["rule-base"];
 
     let mut mcp = Session::new(dir.path(), None);
     let resp = mcp.tool(

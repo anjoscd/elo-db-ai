@@ -9,7 +9,7 @@ use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 
 use crate::bench::elo_selector::E1;
-use crate::bench::fixture::{Event, Item, Kind, Status};
+use crate::bench::fixture::{Event, Item, Status};
 use crate::bench::selector::{render, Selector, SessionState};
 use crate::config::Config;
 use crate::discover::{discover, to_toml};
@@ -649,52 +649,7 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
         let fx = live_fixture(root, config.clone(), items);
         let mut selection = E1.select(&fx, &ev, &mut session.state);
         let seq = i64::try_from(session.seq).unwrap_or(i64::MAX);
-        if session.seq > 0
-            && config.feedback.ask_every > 0
-            && session.seq.is_multiple_of(config.feedback.ask_every)
-        {
-            let prior = prior_session_deliveries(&store, &input.session_id, seq, 40)?;
-            let mut delivered: Vec<String> = Vec::new();
-            for id in selection
-                .full_ids
-                .iter()
-                .filter(|id| {
-                    fx.items
-                        .iter()
-                        .any(|item| item.id == **id && item.kind != Kind::Law)
-                })
-                .chain(&prior)
-            {
-                if !delivered.contains(id) {
-                    delivered.push(id.clone());
-                    if delivered.len() == 5 {
-                        break;
-                    }
-                }
-            }
-            // Only opaque session tokens may be echoed into the envelope.
-            let sid_ok = !input.session_id.is_empty()
-                && input.session_id.len() <= 128
-                && input
-                    .session_id
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
-            if !delivered.is_empty() && sid_ok {
-                let ids_text = delivered.join(", ");
-                let sid = &input.session_id;
-                selection.feedback_line = Some(format!(
-                    "Optional, one call: elo_feedback(session_id:\"{sid}\", used:[...], ignored:[...]) for these full items: [{ids_text}]."
-                ));
-            }
-        }
-
-        let mut rendered = render(&fx, &ev, &selection);
-        if selection.feedback_line.is_some()
-            && rendered.len() > config.workspace.budget_bytes as usize
-        {
-            selection.feedback_line = None;
-            rendered = render(&fx, &ev, &selection);
-        }
+        let rendered = render(&fx, &ev, &selection);
         selection.used_bytes = rendered.len();
         let ids: Vec<(&str, Mode)> = selection
             .full_ids
@@ -783,30 +738,6 @@ fn recently_delivered(
         .prepare(
             "SELECT DISTINCT item_id FROM injections \
              WHERE session_id = ?1 AND event_seq >= ?2 AND event_seq < ?3 AND mode = 'full'",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(rusqlite::params![session, lower, seq], |r| {
-            r.get::<_, String>(0)
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
-}
-
-/// Items delivered earlier in this session within the `window`-event feedback window (`[seq - (window - 1), seq - 1]`).
-fn prior_session_deliveries(
-    store: &Store,
-    session: &str,
-    seq: i64,
-    window: u64,
-) -> Result<Vec<String>, String> {
-    let lower = seq.saturating_sub(i64::try_from(window.saturating_sub(1)).unwrap_or(i64::MAX));
-    let mut stmt = store
-        .conn
-        .prepare(
-            "SELECT item_id, MAX(event_seq) AS last_seq FROM injections \
-             WHERE session_id = ?1 AND event_seq >= ?2 AND event_seq < ?3 AND mode = 'full' AND kind != 'law' \
-             GROUP BY item_id ORDER BY last_seq DESC, item_id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt

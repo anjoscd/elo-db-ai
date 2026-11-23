@@ -12,10 +12,14 @@ pub struct E1;
 
 /// How many recent events keep a touched file's project active (SPEC §3.1, `touch_window`).
 const TOUCH_WINDOW: u64 = 20;
-/// Real mode only: an item pointed within this many events is not pointed again.
-const POINTER_REPEAT_WINDOW: u64 = 20;
 /// Real mode only: total pointer cap per event across all categories.
-const MAX_POINTERS: usize = 8;
+const MAX_POINTERS: usize = 3;
+/// Real mode only: globals promoted by a specific match per event.
+const MAX_PROMOTED_GLOBALS: usize = 2;
+/// Real mode only: minimum normalised idf (over every non-note item) for one keyword that
+/// reads like a name to make a match specific. Tuned on real prompts: product names sit
+/// at 0.69-0.89 in a store of about 480 items, a word in eleven items at 0.60.
+const SPECIFIC_NAME_MIN_IDF: f64 = 0.65;
 
 #[cfg(test)]
 thread_local! {
@@ -36,6 +40,11 @@ const MAX_NOTE_POINTERS: usize = 5;
 /// indented lines, fenced blocks (a run of 3+ backticks or tildes, anywhere, up to the
 /// next run of the same length, across lines) and inline spans (1–2 backticks, same line).
 fn prose(prompt: &str) -> String {
+    normalize(&without_code(prompt))
+}
+
+/// Same as `prose`, keeping the original case.
+fn without_code(prompt: &str) -> String {
     let unindented: Vec<&str> = prompt
         .lines()
         .filter(|l| !(l.starts_with("    ") || l.starts_with('\t')))
@@ -93,7 +102,7 @@ fn prose(prompt: &str) -> String {
             }
         }
     }
-    normalize(&out)
+    out
 }
 
 /// Remove image metadata before matching prose or project aliases.
@@ -291,19 +300,103 @@ fn keyword_matches(item: &Item, text: &str) -> usize {
         .len()
 }
 
-/// Real-mode check: has `item` been pointed recently enough to be considered a repeat?
-/// Exempt if the current prompt matches two or more distinct keywords of the item.
-fn is_repeated_pointer(item: &Item, ev: &Event, state: &SessionState, text: &str) -> bool {
-    if ev.allowed_scopes.is_empty() {
-        if let Some(&last) = state.pointed.get(&item.id) {
-            if ev.event_seq.saturating_sub(last) < POINTER_REPEAT_WINDOW
-                && keyword_matches(item, text) < 2
-            {
-                return true;
+/// Function words never make a match specific, even when an item lists them as triggers.
+const FUNCTION_WORDS: &[&str] = &[
+    "a", "agora", "ainda", "aqui", "as", "com", "como", "da", "das", "de", "do", "dos", "e", "ela",
+    "ele", "em", "essa", "esse", "esta", "este", "isso", "isto", "ja", "mais", "mas", "na", "nao",
+    "no", "o", "onde", "os", "ou", "para", "pela", "pelo", "por", "porque", "pra", "quando", "que",
+    "se", "sem", "sim", "so", "tambem", "tudo", "um", "uma", "and", "for", "the", "this", "that",
+    "with", "why",
+];
+
+fn is_function_word(word: &str) -> bool {
+    FUNCTION_WORDS.contains(&word)
+}
+
+/// Like `keyword_matches`, but function words do not count.
+fn content_keyword_matches(item: &Item, text: &str) -> usize {
+    item.triggers
+        .keywords
+        .iter()
+        .map(|k| normalize(k))
+        .filter(|k| !k.is_empty() && !is_function_word(k) && has_word(text, k))
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+/// Of the `wanted` normalised words, those written capitalised mid-sentence at least as
+/// often as in lower case across item titles and bodies: product, tool and service names
+/// ("Zorvex", "Strava"), not common words that only sometimes open a phrase ("Chave",
+/// "Motor"). Only the wanted words are counted, so the hook pays for a scan only when a
+/// prompt has a rare single keyword.
+fn name_words<'a>(
+    items: impl Iterator<Item = &'a Item>,
+    wanted: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut counts: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    if wanted.is_empty() {
+        return BTreeSet::new();
+    }
+    // Folding keeps the character count for accents; checking it first skips most words.
+    let lengths: BTreeSet<usize> = wanted.iter().map(|w| w.chars().count()).collect();
+    for item in items {
+        // Code is left out: type names such as `Config` are not product names.
+        for text in [without_code(&item.title), without_code(&item.body)] {
+            let mut sentence_start = true;
+            let mut word = String::new();
+            for c in text.chars().chain(std::iter::once(' ')) {
+                if c.is_alphanumeric() {
+                    word.push(c);
+                    continue;
+                }
+                if !word.is_empty() {
+                    let folded = if lengths.contains(&word.chars().count()) {
+                        Some(normalize(&word)).filter(|w| wanted.contains(w))
+                    } else {
+                        None
+                    };
+                    if let Some(folded) = folded {
+                        let entry = counts.entry(folded).or_default();
+                        if !word.chars().next().is_some_and(char::is_uppercase) {
+                            entry.1 += 1;
+                        } else if !sentence_start {
+                            entry.0 += 1;
+                        }
+                    }
+                    sentence_start = false;
+                    word.clear();
+                }
+                if matches!(
+                    c,
+                    '.' | '!' | '?' | ':' | '\n' | '*' | '#' | '(' | '"' | '`'
+                ) {
+                    sentence_start = true;
+                }
             }
         }
     }
-    false
+    counts
+        .into_iter()
+        .filter(|(_, (upper, lower))| *upper > 0 && upper >= lower)
+        .map(|(word, _)| word)
+        .collect()
+}
+
+/// A keyword reads like a name: it has a digit or a hyphen, or it is capitalised
+/// mid-sentence at least as often as in lower case across the store (see `name_words`).
+fn name_like_keyword(keyword: &str, names: &BTreeSet<String>) -> bool {
+    let k = normalize(keyword);
+    if k.is_empty() || is_function_word(&k) || k.contains(char::is_whitespace) {
+        return false;
+    }
+    k.chars()
+        .any(|c| c.is_ascii_digit() || c == '-' || c == '_')
+        || names.contains(&k)
+}
+
+/// Real-mode pointers are delivered at most once until session state is reset.
+fn is_repeated_pointer(item: &Item, ev: &Event, state: &SessionState) -> bool {
+    ev.allowed_scopes.is_empty() && state.pointed.contains_key(&item.id)
 }
 
 /// Score for pointer candidates that did not go through the normal scoring pipeline
@@ -333,9 +426,8 @@ fn fallback_score(
     W_PROXIMITY * proximity + W_RECENCY * recency + W_IMPORTANCE * importance + match_strength
 }
 
-/// Real-mode final pointer policy: remove already-served items, suppress repeats within
-/// `POINTER_REPEAT_WINDOW`, and cap the total to `MAX_POINTERS` while keeping the
-/// highest-scored candidates. Benchmark mode is left untouched.
+/// Real-mode final pointer policy: remove served items and session repeats,
+/// then keep at most `MAX_POINTERS` highest-scored candidates. Benchmark mode is left untouched.
 fn finalize_pointers(
     fx: &Fixture,
     selection: &mut Selection,
@@ -343,7 +435,6 @@ fn finalize_pointers(
     cross: &[(&Item, usize)],
     ev: &Event,
     state: &SessionState,
-    text: &str,
 ) {
     if !ev.allowed_scopes.is_empty() {
         return;
@@ -382,8 +473,8 @@ fn finalize_pointers(
                 continue;
             }
         };
-        // Pointed recently? Exempt when the current prompt matches two or more keywords.
-        if is_repeated_pointer(item, ev, state, text) {
+        // A pointer is emitted only once per session.
+        if is_repeated_pointer(item, ev, state) {
             continue;
         }
         let score = score_of.get(id.as_str()).copied().unwrap_or_else(|| {
@@ -458,7 +549,7 @@ fn limit_notes(
             .filter(|(id, _)| !notes.full_ids.contains(id) && !notes.pointer_ids.contains(id))
             .collect();
         notes.omitted_notes.clear();
-        if !omitted.is_empty() {
+        if !omitted.is_empty() && !ev.allowed_scopes.is_empty() {
             let keyword = omitted
                 .iter()
                 .flat_map(|(id, _)| &items[id.as_str()].triggers.keywords)
@@ -529,13 +620,7 @@ fn limit_notes(
 
 /// Keeps at most `MAX_NOTE_POINTERS` note/decision pointers: the highest scored ones
 /// (ties: most recent `updated_at`, then id). Rule and law pointers keep their order.
-fn limit_note_pointers(
-    fx: &Fixture,
-    ev: &Event,
-    text: &str,
-    scored: &[(f64, &Item)],
-    selection: &mut Selection,
-) {
+fn limit_note_pointers(fx: &Fixture, scored: &[(f64, &Item)], selection: &mut Selection) {
     let items: BTreeMap<&str, &Item> = fx.items.iter().map(|i| (i.id.as_str(), i)).collect();
     let is_note_id = |id: &str| items.get(id).is_some_and(|i| is_note(i));
     if selection
@@ -567,45 +652,9 @@ fn limit_note_pointers(
         .take(MAX_NOTE_POINTERS)
         .cloned()
         .collect();
-    let cut: Vec<String> = selection
-        .pointer_ids
-        .iter()
-        .filter(|id| is_note_id(id.as_str()) && !keep.contains(id.as_str()))
-        .cloned()
-        .collect();
     selection
         .pointer_ids
         .retain(|id| !is_note_id(id.as_str()) || keep.contains(id.as_str()));
-    // Cut pointers join the omission notice, so `elo recall` still finds them. The total
-    // is recounted from every matched note (an earlier notice may have been dropped for
-    // size), and the notice is kept only if the whole output still fits the budget.
-    let shown = |id: &str| {
-        selection.full_ids.iter().any(|f| f == id) || selection.pointer_ids.iter().any(|p| p == id)
-    };
-    let omitted = scored
-        .iter()
-        .filter(|(_, i)| is_note(i) && !shown(i.id.as_str()))
-        .count();
-    let keyword = selection
-        .omitted_notes
-        .first()
-        .map(|(_, k)| k.clone())
-        .or_else(|| {
-            cut.iter()
-                .flat_map(|id| &items[id.as_str()].triggers.keywords)
-                .map(|k| normalize(k))
-                .find(|k| has_word(text, k))
-        })
-        .unwrap_or_else(|| "notas".into());
-    selection.omitted_notes = if omitted > 0 {
-        vec![(omitted, keyword)]
-    } else {
-        vec![]
-    };
-    let budget = usize::try_from(fx.config.workspace.budget_bytes).unwrap_or(usize::MAX);
-    if render(fx, ev, selection).len() > budget {
-        selection.omitted_notes.clear();
-    }
 }
 
 impl Selector for E1 {
@@ -650,8 +699,49 @@ impl Selector for E1 {
             let d = *df.get(&normalize(k)).unwrap_or(&0) as f64;
             ((n + 1.0) / (d + 1.0)).ln() / max_idf
         };
+        // Rarity for the specific match counts decisions too (the scoring idf above leaves
+        // them out to keep the rule baseline); only notes are left out.
+        let mut specific_df: BTreeMap<String, usize> = BTreeMap::new();
+        for item in fx.items.iter().filter(|i| i.kind != Kind::Note) {
+            for k in &item.triggers.keywords {
+                *specific_df.entry(normalize(k)).or_default() += 1;
+            }
+        }
+        let specific_n = fx
+            .items
+            .iter()
+            .filter(|i| i.kind != Kind::Note)
+            .count()
+            .max(1) as f64;
+        let specific_idf = |k: &str| {
+            let d = *specific_df.get(&normalize(k)).unwrap_or(&0) as f64;
+            ((specific_n + 1.0) / (d + 1.0)).ln() / (specific_n + 1.0).ln()
+        };
         let now = DateTime::parse_from_rfc3339(&ev.now).ok();
+        // The name test only runs for single, rare, plain keywords present in the prompt.
+        let rare_single = |k: &str| {
+            let k = normalize(k);
+            !k.is_empty()
+                && !is_function_word(&k)
+                && !k.contains(char::is_whitespace)
+                && has_word(&text, &k)
+                && specific_idf(&k) >= SPECIFIC_NAME_MIN_IDF
+        };
+        let wanted: BTreeSet<String> = if ev.allowed_scopes.is_empty() {
+            fx.items
+                .iter()
+                .filter(|i| i.kind != Kind::Note && i.kind != Kind::Law)
+                .flat_map(|i| &i.triggers.keywords)
+                .filter(|k| rare_single(k))
+                .map(|k| normalize(k))
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        let names = name_words(fx.items.iter(), &wanted);
 
+        // Globals promoted by a specific match: (promoted score, plain score, id).
+        let mut boosted: Vec<(f64, f64, String)> = Vec::new();
         let mut indexed = BTreeSet::new();
         let mut laws: Vec<&Item> = Vec::new();
         let mut scored: Vec<(f64, &Item)> = Vec::new();
@@ -678,6 +768,9 @@ impl Selector for E1 {
                 .paths
                 .iter()
                 .any(|p| touched.iter().any(|t| path_matches(p, t)));
+            if ev.allowed_scopes.is_empty() && item.kind == Kind::Note && !path_hit {
+                continue;
+            }
             let always = item.triggers.always
                 && !crate::stats::demoted(item, fx.config.workspace.demote_bad_min);
             let project_scope_allowed = eligible(&scope, item);
@@ -713,8 +806,24 @@ impl Selector for E1 {
             {
                 indexed.insert(item.id.clone());
             }
-            if is_note(item) && !path_hit && keyword_matches(item, &text) < 2 {
-                // History and single keywords can suggest pointers, never full notes.
+            // A single keyword is specific only when it is rare among items AND reads like a
+            // name (capitalised mid-sentence somewhere in the store, or with a digit or a
+            // hyphen): common words such as "motor" or "porque" are rare as triggers but not
+            // in prompts.
+            let specific = real_mode
+                && (content_keyword_matches(item, &text) >= 2
+                    || item.triggers.keywords.iter().any(|k| {
+                        has_word(&text, k)
+                            && specific_idf(k) >= SPECIFIC_NAME_MIN_IDF
+                            && name_like_keyword(k, &names)
+                    }));
+            let boost = item.scope == "global" && specific && !path_hit;
+            if is_note(item)
+                && !path_hit
+                && keyword_matches(item, &text) < 2
+                && !(real_mode && specific)
+            {
+                // History alone and non-specific keywords cannot promote notes or decisions.
                 indexed.insert(item.id.clone());
             }
             if kw.is_empty()
@@ -727,6 +836,8 @@ impl Selector for E1 {
             }
             let proximity = if path_hit {
                 1.0
+            } else if boost {
+                0.5
             } else {
                 match item.scope.split_once(':') {
                     Some(("project", p)) if scope.primary.as_deref() == Some(p) => 0.6,
@@ -757,15 +868,32 @@ impl Selector for E1 {
             } else {
                 strength
             };
-            let score = W_PROXIMITY * proximity
-                + W_RECENCY * recency
+            let rest = W_RECENCY * recency
                 + W_IMPORTANCE * item.importance.clamp(0.0, 1.0)
                 + W_MATCH * strength;
+            let score = W_PROXIMITY * proximity + rest;
+            if boost {
+                boosted.push((score, W_PROXIMITY * 0.2 + rest, item.id.clone()));
+            }
             if !path_hit && score < fx.config.workspace.full_min_score {
                 indexed.insert(item.id.clone());
             }
             if score >= fx.config.workspace.min_score {
                 scored.push((score, item));
+            }
+        }
+
+        // At most two promoted globals per event, chosen before any layer packs them, so an
+        // extra global never takes a slot and is then dropped. The rest keep their plain score.
+        boosted.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+        for (_, plain, id) in boosted.iter().skip(MAX_PROMOTED_GLOBALS) {
+            if *plain < fx.config.workspace.full_min_score {
+                indexed.insert(id.clone());
+            }
+            if *plain < fx.config.workspace.min_score {
+                scored.retain(|(_, item)| item.id != *id);
+            } else if let Some(entry) = scored.iter_mut().find(|(_, item)| item.id == *id) {
+                entry.0 = *plain;
             }
         }
 
@@ -903,7 +1031,7 @@ impl Selector for E1 {
         // Real mode only: too many note/decision pointers is noise; keep the best five.
         // Benchmark mode (allowed_scopes filled) keeps measuring the legacy policy.
         if ev.allowed_scopes.is_empty() {
-            limit_note_pointers(fx, ev, &text, &scored, &mut selection);
+            limit_note_pointers(fx, &scored, &mut selection);
         }
         // Add cross-project keyword pointers (max 3) that fit inside the budget.
         // Candidates are sorted by relevance (more keyword matches first, then id), duplicates
@@ -1019,7 +1147,6 @@ impl Selector for E1 {
             &cross_pointer_entries,
             ev,
             state,
-            &text,
         );
         if real_prompt && ev.prompt.is_some() && !text.trim().is_empty() {
             let mut end = text.len().min(400);
@@ -1441,13 +1568,14 @@ mod tests {
     #[test]
     fn vague_prompts_inherit_only_recent_topics() {
         let (mut fx, mut ev) = prompt_fixture();
+        fx.items[0].kind = Kind::Decision;
         fx.items[0].triggers.keywords = vec!["widget".into()];
         let mut state = SessionState::default();
         ev.prompt = Some("corrigir o widget".into());
         E1.select(&fx, &ev, &mut state);
         ev.prompt = Some("pode fazer o 2".into());
         let inherited = E1.select(&fx, &ev, &mut state);
-        // One common inherited word: the note comes back (as an index line).
+        // One inherited word can still suggest a decision pointer.
         assert!(
             inherited.full_ids.contains(&"note-0".into())
                 || inherited.pointer_ids.contains(&"note-0".into())
@@ -1491,7 +1619,8 @@ mod tests {
             Kind::Pitfall,
             Kind::Law,
         ] {
-            let (mut fx, ev) = prompt_fixture();
+            let (mut fx, mut ev) = prompt_fixture();
+            ev.allowed_scopes.push("global".into());
             fx.items.truncate(1);
             let item = &mut fx.items[0];
             item.kind = kind;
@@ -1540,7 +1669,7 @@ mod tests {
             assert!(selection.full_ids.is_empty());
             assert_eq!(
                 selection.pointer_ids.len(),
-                if kind == Kind::Note { 5 } else { 8 }
+                if kind == Kind::Note { 0 } else { MAX_POINTERS }
             );
         }
     }
@@ -1555,14 +1684,23 @@ mod tests {
                 fx.config.workspace.full_notes_max = 0;
                 fx.items[0].kind = kind;
                 fx.items[0].triggers.keywords = vec!["zebra".into(), "herd".into()];
+                // "Zebra" reads like a name, so one current word is specific.
+                fx.items[0].body = "We feed Zebra every day.".into();
+                add_fillers(&mut fx, 15);
                 ev.prompt = Some(prompt.into());
                 let mut state = SessionState {
                     recent_prompts: vec!["zebra herd".into()],
                     ..Default::default()
                 };
                 let selection = E1.select(&fx, &ev, &mut state);
-                assert_eq!(!selection.full_ids.is_empty(), prompt == "zebra herd");
-                assert_eq!(!selection.pointer_ids.is_empty(), prompt != "zebra herd");
+                assert_eq!(
+                    !selection.full_ids.is_empty(),
+                    kind == Kind::Decision && prompt != "please proceed"
+                );
+                assert_eq!(
+                    !selection.pointer_ids.is_empty(),
+                    kind == Kind::Decision && prompt == "please proceed"
+                );
                 fx.items[0].triggers.paths = vec!["src/*".into()];
                 state.touched.push(("src/main.rs".into(), ev.event_seq));
                 assert_eq!(E1.select(&fx, &ev, &mut state).full_ids, ["note-0"]);
@@ -1584,7 +1722,7 @@ mod tests {
                 }
                 let sel = E1.select(&fx, &ev, &mut SessionState::default());
                 assert!(!sel.full_ids.contains(&"note-0".into()));
-                assert!(sel.pointer_ids.contains(&"note-0".into()));
+                assert_eq!(sel.pointer_ids.contains(&"note-0".into()), benchmark);
             }
         }
     }
@@ -1672,7 +1810,7 @@ mod tests {
             assert_eq!(state.recent_prompts, ["widget"]);
             ev.prompt = Some("[Image: source: /tmp/widget/image.png]".into());
             let sel = E1.select(&fx, &ev, &mut state);
-            assert!(sel.pointer_ids.contains(&"note-0".into()));
+            assert_eq!(sel.pointer_ids.contains(&"note-0".into()), benchmark);
             ev.prompt = Some("[Image #2]".into());
             let sel = E1.select(&fx, &ev, &mut state);
             assert!(sel.full_ids.is_empty() && sel.pointer_ids.is_empty());
@@ -1688,29 +1826,26 @@ mod tests {
     }
 
     #[test]
-    fn many_note_pointers_keep_only_the_best_five() {
+    fn notes_without_paths_never_produce_pointers_or_notices() {
         let (fx, ev) = note_fixture(0, false);
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
-        let expected: BTreeSet<String> = ["note-7", "note-6", "note-5", "note-4", "note-3"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        assert_eq!(note_pointers(&sel), expected);
+        assert!(sel.full_ids.is_empty());
+        assert!(sel.pointer_ids.is_empty());
+        assert!(sel.omitted_notes.is_empty());
+        assert!(render(&fx, &ev, &sel).is_empty());
     }
 
     #[test]
-    fn rule_pointers_below_the_cap_survive_with_note_pointers() {
-        // With only two rule pointers in this fixture they survive alongside the best
-        // note pointers; the cap is not exercised here.
+    fn rule_pointers_survive_without_unmatched_notes() {
         let (fx, ev) = note_fixture(2, false);
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
-        assert_eq!(note_pointers(&sel).len(), MAX_NOTE_POINTERS);
+        assert!(note_pointers(&sel).is_empty());
         assert!(sel.pointer_ids.contains(&"rule-0".to_string()));
         assert!(sel.pointer_ids.contains(&"rule-1".to_string()));
     }
 
     #[test]
-    fn real_mode_caps_total_pointers_at_eight_with_twelve_rules() {
+    fn real_mode_caps_total_pointers_at_three_with_twelve_rules() {
         // Enough rules to trigger the cap and force an omitted-pointers line.
         // Notes are removed and the budget is tight so every rule becomes a pointer.
         let (mut fx, mut ev) = note_fixture(12, false);
@@ -1723,9 +1858,9 @@ mod tests {
         ev.prompt = Some("zebra".into());
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
         assert_eq!(sel.pointer_ids.len(), MAX_POINTERS);
-        assert_eq!(sel.omitted_pointers, 4);
+        assert_eq!(sel.omitted_pointers, 9);
         let out = render(&fx, &ev, &sel);
-        assert!(out.contains("+4 more → elo context"));
+        assert!(out.contains("+9 more → elo context"));
         assert!(sel.used_bytes <= fx.config.workspace.budget_bytes as usize);
     }
 
@@ -1805,12 +1940,13 @@ mod tests {
     }
 
     #[test]
-    fn repeated_pointer_is_suppressed_within_window_except_on_two_keywords() {
+    fn pointers_are_once_per_session_even_with_two_keywords_and_return_after_reset() {
         let (mut fx, mut ev) = note_fixture(0, false);
         // Keep the note as a pointer by giving it an oversized body and a tight budget.
         fx.config.workspace.budget_bytes = 500;
         fx.config.workspace.full_notes_max = 0;
         let mut note = fx.items.iter().find(|i| is_note(i)).cloned().unwrap();
+        note.kind = Kind::Decision;
         note.triggers.keywords = vec!["alpha".into(), "beta".into()];
         note.body = "b".repeat(1000);
         fx.items = vec![note.clone()];
@@ -1824,18 +1960,26 @@ mod tests {
         assert!(!sel2.pointer_ids.contains(&note.id));
         ev.prompt = Some("alpha beta".into());
         let sel3 = E1.select(&fx, &ev, &mut state);
-        assert!(sel3.pointer_ids.contains(&note.id));
+        assert!(!sel3.pointer_ids.contains(&note.id));
         state.record(&ev, &sel3);
         ev.prompt = Some("alpha".into());
         ev.event_seq = 22;
         let sel4 = E1.select(&fx, &ev, &mut state);
-        assert!(sel4.pointer_ids.contains(&note.id));
+        assert!(!sel4.pointer_ids.contains(&note.id));
+        for reset in ["compaction", "session-start"] {
+            ev.event_type = reset.into();
+            state.begin_event(&ev);
+            ev.event_type = "user-prompt-submit".into();
+            let selection = E1.select(&fx, &ev, &mut state);
+            assert!(selection.pointer_ids.contains(&note.id));
+            state.record(&ev, &selection);
+        }
     }
 
     #[test]
-    fn real_mode_caps_total_pointers_at_eight_and_shows_omitted_line() {
+    fn real_mode_caps_total_pointers_at_three_and_shows_omitted_line() {
         let (mut fx, mut ev) = note_fixture(1, false);
-        // Small budget forces every rule into a pointer; 30 rules become 8 kept + 22 omitted.
+        // Small budget forces every rule into a pointer; 30 rules become 3 kept + 27 omitted.
         fx.config.workspace.budget_bytes = 2_000;
         fx.config.workspace.notes_budget_bytes = 0;
         let base = fx
@@ -1859,9 +2003,9 @@ mod tests {
         ev.prompt = Some("zebra".into());
         let sel = E1.select(&fx, &ev, &mut SessionState::default());
         assert_eq!(sel.pointer_ids.len(), MAX_POINTERS);
-        assert_eq!(sel.omitted_pointers, 22);
+        assert_eq!(sel.omitted_pointers, 27);
         let out = render(&fx, &ev, &sel);
-        assert!(out.contains("+22 more → elo context"));
+        assert!(out.contains("+27 more → elo context"));
     }
 
     #[test]
@@ -1874,6 +2018,7 @@ mod tests {
         fx.config.workspace.budget_bytes = 500;
         fx.config.workspace.full_notes_max = 0;
         let mut high = fx.items.iter().find(|i| is_note(i)).cloned().unwrap();
+        high.kind = Kind::Decision;
         high.id = "z-high".into(); // alphabetically after the other item
         high.triggers.keywords = vec!["alpha".into()];
         high.importance = 0.9;
@@ -1992,7 +2137,7 @@ mod tests {
         assert_eq!(sel.pointer_ids.len(), MAX_POINTERS);
         // The cross-project pointer is the lowest-ranked and is dropped.
         assert!(!sel.pointer_ids.contains(&"cross-1".to_string()));
-        assert_eq!(sel.omitted_pointers, 2);
+        assert_eq!(sel.omitted_pointers, 7);
     }
 
     #[test]
@@ -2065,6 +2210,26 @@ mod tests {
     }
 
     /// `ages` (hours before `ev.now`) become decisions `dec-0..` on the common word "widget".
+    fn wanted(words: &[&str]) -> BTreeSet<String> {
+        words.iter().map(|w| (*w).to_string()).collect()
+    }
+
+    /// Archived rules that only make the other keywords rare (the rarity counts every
+    /// non-note item, archived ones included).
+    fn add_fillers(fx: &mut Fixture, count: usize) {
+        let mut base = fx.items[0].clone();
+        base.kind = Kind::Rule;
+        base.scope = "project:unrelated".into();
+        base.status = Status::Archived;
+        base.triggers.keywords = vec!["filler".into()];
+        base.triggers.paths.clear();
+        for n in 0..count {
+            let mut item = base.clone();
+            item.id = format!("filler-{n}");
+            fx.items.push(item);
+        }
+    }
+
     fn recent_fixture(ages: &[i64]) -> (Fixture, Event) {
         let (mut fx, mut ev) = prompt_fixture();
         fx.config.workspace.full_notes_max = 2;
@@ -2082,8 +2247,181 @@ mod tests {
                 item
             })
             .collect();
+        let mut common = base.clone();
+        common.id = "common-rule".into();
+        common.kind = Kind::Rule;
+        common.scope = "project:unrelated".into();
+        common.status = Status::Archived;
+        common.triggers.keywords = vec!["widget".into()];
+        fx.items.push(common);
         ev.prompt = Some("o que falta para melhorar o widget".into());
         (fx, ev)
+    }
+
+    #[test]
+    fn specific_global_matches_open_the_gate_only_from_the_current_prompt() {
+        let (mut fx, mut ev) = recent_fixture(&[0, 0, 0]);
+        fx.config.workspace.full_min_score = 0.6;
+        fx.config.workspace.abstain_below = 0.6;
+        fx.config.workspace.full_notes_max = 0;
+        fx.config.workspace.notes_budget_bytes = 0;
+        fx.config.shadow.enabled = true;
+        fx.items.retain(|item| item.kind == Kind::Decision);
+        for item in &mut fx.items {
+            item.triggers.keywords = vec!["rareword".into(), "secondword".into()];
+            item.body = "We moved to Rareword last week.".into();
+        }
+        // Three decisions share the words, so only two distinct words are specific here.
+        ev.prompt = Some("rareword secondword".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert_eq!(sel.full_ids.len(), 2);
+        assert_eq!(sel.pointer_ids.len(), 1);
+        assert!(!sel.shadow.as_ref().unwrap().abstained);
+        assert!(sel.shadow.as_ref().unwrap().top >= 0.6);
+        ev.prompt = Some("continue".into());
+        let mut state = SessionState {
+            recent_prompts: vec!["rareword secondword".into()],
+            ..Default::default()
+        };
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert!(sel.full_ids.is_empty());
+        assert!(sel.shadow.unwrap().abstained);
+        ev.prompt = Some("rareword secondword".into());
+        ev.allowed_scopes.push("global".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.full_ids.is_empty());
+    }
+
+    #[test]
+    fn a_rare_common_word_or_a_function_word_is_not_specific() {
+        for (keywords, body, prompt, full) in [
+            (vec!["motor"], "the motor plans the week", "motor", false),
+            (vec!["motor"], "We tuned Motor yesterday", "motor", true),
+            (
+                vec!["porque", "plano"],
+                "explains the plan",
+                "porque o plano",
+                false,
+            ),
+        ] {
+            let (mut fx, mut ev) = prompt_fixture();
+            let base = fx.items.last().unwrap().clone();
+            fx.items = (0..15)
+                .map(|n| {
+                    let mut item = base.clone();
+                    item.id = format!("rule-{n}");
+                    item.kind = Kind::Rule;
+                    item.scope = "global".into();
+                    item.importance = 0.5;
+                    item.updated_at = ev.now.clone();
+                    item.body = "filler text".into();
+                    item.triggers.keywords = vec!["common".into()];
+                    if n == 0 {
+                        item.triggers.keywords = keywords.iter().map(|k| (*k).into()).collect();
+                        item.body = body.into();
+                    }
+                    item
+                })
+                .collect();
+            fx.config.workspace.full_min_score = 0.6;
+            ev.prompt = Some(prompt.into());
+            let sel = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(
+                sel.full_ids.contains(&"rule-0".into()),
+                full,
+                "{prompt} / {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn name_words_need_capitals_mid_sentence_at_least_as_often_as_lower_case() {
+        let (fx, _) = prompt_fixture();
+        let mut item = fx.items[0].clone();
+        item.title = "Chave nova".into();
+        item.body =
+            "Use Zorvex here. Motor runs. the chave, a chave, and Zorvex again; zorvex".into();
+        let names = name_words(
+            std::iter::once(&item),
+            &wanted(&["zorvex", "chave", "motor", "config", "item"]),
+        );
+        assert!(names.contains("zorvex"));
+        assert!(!names.contains("chave"));
+        assert!(!names.contains("motor"));
+        assert!(!name_like_keyword("opção 2", &names));
+        assert!(name_like_keyword("v2", &names));
+        assert!(name_like_keyword("open-code-review", &names));
+        assert!(!name_like_keyword("porque", &names));
+    }
+
+    #[test]
+    fn a_rare_name_uses_the_specific_idf_boundary() {
+        // One item in `count` has the word: idf = ln((count + 1) / 2) / ln(count + 1),
+        // which first reaches SPECIFIC_NAME_MIN_IDF (0.65) at seven items.
+        for count in [6, 7] {
+            let (mut fx, mut ev) = prompt_fixture();
+            let mut base = fx.items.last().unwrap().clone();
+            base.body = "Use the Rare tool.".into();
+            fx.items = (0..count)
+                .map(|n| {
+                    let mut item = base.clone();
+                    item.id = format!("rule-{n}");
+                    item.kind = Kind::Rule;
+                    item.triggers.keywords = vec![if n == 0 { "rare" } else { "common" }.into()];
+                    item.importance = 0.5;
+                    item.updated_at = ev.now.clone();
+                    item
+                })
+                .collect();
+            fx.config.workspace.full_min_score = 0.6;
+            ev.prompt = Some("rare".into());
+            let selection = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(selection.full_ids.contains(&"rule-0".into()), count == 7);
+        }
+    }
+
+    #[test]
+    fn common_distinct_keywords_boost_globals_but_duplicates_do_not() {
+        let (mut fx, mut ev) = prompt_fixture();
+        fx.items.retain(|item| item.kind == Kind::Rule);
+        let item = &mut fx.items[0];
+        item.triggers.always = true;
+        item.triggers.keywords = vec!["common".into(), "second".into()];
+        item.importance = 0.5;
+        item.updated_at = ev.now.clone();
+        fx.config.workspace.full_min_score = 0.6;
+        ev.prompt = Some("common second".into());
+        assert_eq!(
+            E1.select(&fx, &ev, &mut SessionState::default())
+                .full_ids
+                .len(),
+            1
+        );
+        fx.items[0].triggers.keywords = vec!["common".into(), "COMMON".into()];
+        ev.prompt = Some("common common".into());
+        assert!(E1
+            .select(&fx, &ev, &mut SessionState::default())
+            .full_ids
+            .is_empty());
+    }
+
+    #[test]
+    fn notes_require_a_path_even_when_specific_or_always() {
+        let (mut fx, ev) = prompt_fixture();
+        fx.items.truncate(1);
+        fx.items[0].triggers.always = true;
+        fx.items[0].triggers.keywords = vec!["zebra".into(), "herd".into()];
+        fx.items[0].triggers.paths = vec!["src/*".into()];
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(render(&fx, &ev, &sel).is_empty());
+        let mut state = SessionState::default();
+        state.touched.push(("src/main.rs".into(), ev.event_seq));
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert_eq!(sel.full_ids, ["note-0"]);
+        fx.items[0].body = "large".repeat(30_000);
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert_eq!(sel.pointer_ids, ["note-0"]);
+        assert!(sel.omitted_notes.is_empty());
     }
 
     #[test]
@@ -2095,16 +2433,118 @@ mod tests {
     }
 
     #[test]
-    fn recent_decision_requires_two_current_words() {
+    fn recent_decision_accepts_two_current_words_or_one_rare_word() {
         for words in [vec!["widget42"], vec!["payments"], vec!["widget", "view"]] {
             let (mut fx, mut ev) = recent_fixture(&[10]);
             fx.config.workspace.full_min_score = 0.0;
             fx.items[0].triggers.keywords = words.iter().map(|s| (*s).into()).collect();
+            fx.items[0].body = "Billing runs on Payments now.".into();
+            add_fillers(&mut fx, 15);
             ev.prompt = Some(words.join(" "));
             let sel = E1.select(&fx, &ev, &mut SessionState::default());
-            assert_eq!(sel.full_ids.contains(&"dec-0".into()), words.len() >= 2);
-            assert_eq!(sel.pointer_ids.contains(&"dec-0".into()), words.len() < 2);
+            assert!(sel.full_ids.contains(&"dec-0".into()));
+            assert!(!sel.pointer_ids.contains(&"dec-0".into()));
         }
+    }
+
+    #[test]
+    fn a_project_decision_keeps_its_slot_when_promoted_globals_exceed_the_cap() {
+        let (mut fx, mut ev) = fallback_fixture(0);
+        ev.cwd = ".".into();
+        fx.config.workspace.full_min_score = 0.0;
+        fx.config.workspace.min_score = 0.0;
+        fx.config.workspace.full_notes_max = 1;
+        let (base, _) = prompt_fixture();
+        let make = |id: &str, kind: Kind, scope: &str, importance: f64| {
+            let mut item = base.items[0].clone();
+            item.id = id.into();
+            item.kind = kind;
+            item.scope = scope.into();
+            item.importance = importance;
+            item.updated_at = ev.now.clone();
+            item.triggers.keywords = vec!["alpha".into(), "beta".into()];
+            item
+        };
+        fx.items = vec![
+            make("rule-g0", Kind::Rule, "global", 1.0),
+            make("rule-g1", Kind::Rule, "global", 1.0),
+            make("dec-g2", Kind::Decision, "global", 0.8),
+            make("dec-p", Kind::Decision, "project:sample", 0.5),
+        ];
+        ev.prompt = Some("alpha beta".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.full_ids.contains(&"rule-g0".into()));
+        assert!(sel.full_ids.contains(&"rule-g1".into()));
+        // The third promoted global falls back to its plain score, so the project
+        // decision wins the only decision slot instead of losing it to a global
+        // that would be dropped later.
+        assert!(sel.full_ids.contains(&"dec-p".into()), "{:?}", sel.full_ids);
+        assert!(!sel.full_ids.contains(&"dec-g2".into()));
+    }
+
+    #[test]
+    fn decisions_count_towards_the_rarity_of_a_specific_word() {
+        let (mut fx, mut ev) = prompt_fixture();
+        let base = fx.items[0].clone();
+        fx.items = (0..30)
+            .map(|n| {
+                let mut item = base.clone();
+                item.id = format!("item-{n}");
+                item.kind = if n < 16 { Kind::Rule } else { Kind::Decision };
+                item.scope = "global".into();
+                item.importance = 0.5;
+                item.updated_at = ev.now.clone();
+                item.body = "We use Zebra daily.".into();
+                // Only one rule has the word, but fourteen decisions do: it is not rare.
+                item.triggers.keywords =
+                    vec![if n == 0 || n >= 16 { "zebra" } else { "other" }.into()];
+                item
+            })
+            .collect();
+        fx.config.workspace.full_min_score = 0.6;
+        ev.prompt = Some("zebra".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(
+            !sel.full_ids.contains(&"item-0".into()),
+            "{:?}",
+            sel.full_ids
+        );
+    }
+
+    #[test]
+    fn names_inside_code_do_not_count() {
+        let (fx, _) = prompt_fixture();
+        let mut item = fx.items[0].clone();
+        item.title = "Settings".into();
+        item.body = "Edit the config file.\n```rust\nlet c = Config::new(Item::default());\n```\nsee `Config` and `Item`".into();
+        let names = name_words(
+            std::iter::once(&item),
+            &wanted(&["zorvex", "chave", "motor", "config", "item"]),
+        );
+        assert!(!names.contains("config"), "{names:?}");
+        assert!(!names.contains("item"), "{names:?}");
+    }
+
+    #[test]
+    fn a_pointer_is_shown_once_per_session_until_compaction() {
+        let (fx, mut ev) = recent_fixture(&[10]);
+        let mut state = SessionState::default();
+        state.begin_event(&ev);
+        let first = E1.select(&fx, &ev, &mut state);
+        state.record(&ev, &first);
+        assert_eq!(first.pointer_ids, ["dec-0"]);
+        ev.event_seq += 40;
+        state.begin_event(&ev);
+        let again = E1.select(&fx, &ev, &mut state);
+        state.record(&ev, &again);
+        assert!(again.pointer_ids.is_empty(), "{:?}", again.pointer_ids);
+        let mut compaction = ev.clone();
+        compaction.event_type = "compaction".into();
+        compaction.event_seq += 1;
+        state.begin_event(&compaction);
+        ev.event_seq += 2;
+        state.begin_event(&ev);
+        assert_eq!(E1.select(&fx, &ev, &mut state).pointer_ids, ["dec-0"]);
     }
 
     #[test]
@@ -2124,9 +2564,7 @@ mod tests {
         assert!(full.is_empty());
         assert_eq!(
             pointers,
-            ["dec-0", "dec-1", "dec-2", "dec-3"]
-                .map(String::from)
-                .into()
+            ["dec-1", "dec-2", "dec-3"].map(String::from).into()
         );
     }
 
