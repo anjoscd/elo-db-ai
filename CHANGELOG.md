@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.8]
+
+### Added
+
+- Items written by an agent are candidates (`[workspace] candidate_sessions = 3`, `0` disables). A candidate goes in full while on trial. After 3 sessions in full without usage evidence (within `demote_unused_days`), or after an owner `elo bad`, it is only a pointer until it is confirmed in 3 sessions by automatic usage, an agent `used` report or an owner `elo good`; after a `bad`, only what comes later counts (usage from a later second, ratings recorded after it). A candidate held back only for disuse is tried again once its failed trials age out of the window; a contradicted one waits for the confirmations. The query reads usage through the per-item indexes. A touched trigger path still delivers it in full; laws and `--as-user` items are unaffected. `elo explain` shows the candidate state, and `elo stats` counts agent items, confirmed and held back. The hook runs one extra aggregate query per prompt (about 2 ms on a store with 31,000 deliveries).
+
 ## [0.3.7]
 
 ### Changed

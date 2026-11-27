@@ -169,6 +169,9 @@ pub struct Workspace {
     pub demote_unused_min: u64,
     /// Rolling window in days before retrying unused items.
     pub demote_unused_days: u32,
+    /// Sessions an agent-written item needs to be confirmed in before a failed trial or an
+    /// owner `bad` stops holding it back to a pointer; zero disables candidacy.
+    pub candidate_sessions: u64,
     /// Maximum descendant projects activated by a parent cwd; zero disables it.
     pub parent_scope_max: usize,
 }
@@ -186,6 +189,7 @@ impl Default for Workspace {
             demote_bad_min: 3,
             demote_unused_min: 6,
             demote_unused_days: 14,
+            candidate_sessions: 3,
             parent_scope_max: 2,
         }
     }

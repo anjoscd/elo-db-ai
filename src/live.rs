@@ -89,6 +89,7 @@ fn load_filtered(store: &Store, id: Option<&str>) -> Result<Vec<Item>, StoreErro
         ) = row?;
         items.push(Item {
             usage_window: Default::default(),
+            candidacy: Default::default(),
             feedback: feedback.remove(&id).unwrap_or_default(),
             id,
             kind: enum_of(&kind)?,

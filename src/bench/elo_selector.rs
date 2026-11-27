@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::DateTime;
 
-use super::fixture::{Event, Fixture, Item, Kind, Status};
+use super::fixture::{Event, Fixture, Item, Kind, Origin, Status};
 use super::selector::{render, render_content, Selection, Selector, SessionState};
 use super::unicode::normalize;
 
@@ -431,6 +431,17 @@ fn fallback_score(
     W_PROXIMITY * proximity + W_RECENCY * recency + W_IMPORTANCE * importance + match_strength
 }
 
+/// An item written by an agent goes in full only while it is on trial or once it is
+/// confirmed; a failed trial or an owner `bad` holds it back to a pointer. A touched
+/// trigger path still delivers it in full (callers check that first).
+fn held_back_candidate(fx: &Fixture, item: &Item) -> bool {
+    item.origin == Origin::Agent
+        && item.kind != Kind::Law
+        && item
+            .candidacy
+            .held_back(fx.config.workspace.candidate_sessions)
+}
+
 /// Real-mode final pointer policy: remove served items and session repeats,
 /// then keep at most `MAX_POINTERS` highest-scored candidates. Benchmark mode is left untouched.
 fn finalize_pointers(
@@ -805,9 +816,10 @@ impl Selector for E1 {
             }
             if real_mode
                 && !path_hit
-                && item
+                && (item
                     .usage_window
                     .demoted(item.kind, fx.config.workspace.demote_unused_min)
+                    || held_back_candidate(fx, item))
             {
                 indexed.insert(item.id.clone());
             }
@@ -1118,7 +1130,8 @@ impl Selector for E1 {
                         && (score.is_none_or(|score| score < fx.config.workspace.full_min_score)
                             || item
                                 .usage_window
-                                .demoted(item.kind, fx.config.workspace.demote_unused_min))
+                                .demoted(item.kind, fx.config.workspace.demote_unused_min)
+                            || held_back_candidate(fx, item))
                     {
                         if selection.pointer_ids.len() < MAX_POINTERS
                             && !selection.pointer_ids.contains(&item.id)
@@ -2391,6 +2404,99 @@ mod tests {
             let sel = E1.select(&fx, &ev, &mut SessionState::default());
             assert_eq!(sel.full_ids.contains(&"rule-0".into()), full, "{count}");
         }
+    }
+
+    fn candidate_fixture(origin: Origin, candidacy: crate::stats::Candidacy) -> (Fixture, Event) {
+        let (mut fx, mut ev) = prompt_fixture();
+        let base = fx.items.last().unwrap().clone();
+        fx.items = (0..15)
+            .map(|n| {
+                let mut item = base.clone();
+                item.id = format!("rule-{n}");
+                item.kind = Kind::Rule;
+                item.scope = "global".into();
+                item.importance = 0.5;
+                item.updated_at = ev.now.clone();
+                item.body = "We publish on Apple first.".into();
+                item.triggers.keywords = vec![if n == 0 { "apple" } else { "common" }.into()];
+                if n == 0 {
+                    item.origin = origin;
+                    item.candidacy = candidacy.clone();
+                }
+                item
+            })
+            .collect();
+        fx.config.workspace.full_min_score = 0.6;
+        ev.prompt = Some("abre a apple".into());
+        (fx, ev)
+    }
+
+    #[test]
+    fn an_agent_item_goes_in_full_on_trial_and_once_confirmed() {
+        use crate::stats::Candidacy;
+        let on_trial = Candidacy {
+            confirmed: 0,
+            unused_trials: 2,
+            contradicted: false,
+        };
+        let confirmed = Candidacy {
+            confirmed: 3,
+            unused_trials: 5,
+            contradicted: true,
+        };
+        for candidacy in [on_trial, confirmed] {
+            let (fx, ev) = candidate_fixture(Origin::Agent, candidacy.clone());
+            let sel = E1.select(&fx, &ev, &mut SessionState::default());
+            assert!(sel.full_ids.contains(&"rule-0".into()), "{candidacy:?}");
+        }
+    }
+
+    #[test]
+    fn a_failed_or_contradicted_agent_item_is_only_a_pointer() {
+        use crate::stats::Candidacy;
+        let failed = Candidacy {
+            confirmed: 2,
+            unused_trials: 3,
+            contradicted: false,
+        };
+        let contradicted = Candidacy {
+            confirmed: 2,
+            unused_trials: 0,
+            contradicted: true,
+        };
+        for candidacy in [failed, contradicted] {
+            let (fx, ev) = candidate_fixture(Origin::Agent, candidacy.clone());
+            let sel = E1.select(&fx, &ev, &mut SessionState::default());
+            assert!(!sel.full_ids.contains(&"rule-0".into()), "{candidacy:?}");
+            assert!(sel.pointer_ids.contains(&"rule-0".into()), "{candidacy:?}");
+        }
+    }
+
+    #[test]
+    fn candidacy_holds_back_only_agent_items_in_real_use() {
+        use crate::stats::Candidacy;
+        let failed = Candidacy {
+            confirmed: 0,
+            unused_trials: 3,
+            contradicted: true,
+        };
+        // The owner's own items ignore the record.
+        let (fx, ev) = candidate_fixture(Origin::User, failed.clone());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.full_ids.contains(&"rule-0".into()));
+        // Zero disables candidacy.
+        let (mut fx, ev) = candidate_fixture(Origin::Agent, failed.clone());
+        fx.config.workspace.candidate_sessions = 0;
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(sel.full_ids.contains(&"rule-0".into()));
+        // A touched trigger path still delivers it in full.
+        let (mut fx, mut ev) = candidate_fixture(Origin::Agent, failed);
+        fx.items[0].triggers.paths = vec!["src/publish.rs".into()];
+        ev.tool_paths = Some(vec!["src/publish.rs".into()]);
+        let mut state = SessionState::default();
+        state.begin_event(&ev);
+        let sel = E1.select(&fx, &ev, &mut state);
+        assert!(sel.full_ids.contains(&"rule-0".into()), "{sel:?}");
     }
 
     #[test]

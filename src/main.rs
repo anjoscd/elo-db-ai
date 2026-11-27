@@ -877,6 +877,28 @@ fn run_stats(root: &Path, since: Option<i64>, by: By) -> Result<ExitCode, AppErr
         count
     };
     writeln!(out, "demoted (unused)   {}", unused_count)?;
+    let sessions = config.workspace.candidate_sessions;
+    if sessions > 0 {
+        let candidacies = store.candidacies(
+            elo_ctx::store::now_seconds(),
+            config.workspace.demote_unused_days,
+        );
+        let held = candidacies
+            .values()
+            .filter(|c| c.held_back(sessions))
+            .count();
+        let confirmed = candidacies
+            .values()
+            .filter(|c| c.confirmed >= sessions)
+            .count();
+        writeln!(
+            out,
+            "agent items        {} (confirmed {}, held back {})",
+            candidacies.len(),
+            confirmed,
+            held
+        )?;
+    }
     writeln!(out, "events             {}", st.events)?;
     writeln!(out, "items full         {}", st.full)?;
     writeln!(out, "items as pointer   {}", st.pointers)?;

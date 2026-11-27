@@ -750,6 +750,91 @@ impl UsageWindow {
     }
 }
 
+/// Track record of an item written by an agent (origin `agent`, never a law). Fixtures
+/// and other origins leave it empty.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Candidacy {
+    /// Distinct sessions with usage evidence (automatic or an agent `used` report) plus
+    /// owner `good` ratings, counted after the latest owner `bad`: owner ratings by their
+    /// order of recording, other evidence only from a later second (a signal in the same
+    /// second as the `bad` does not count).
+    pub confirmed: u64,
+    /// Distinct sessions inside the unused window with a full prompt delivery and no
+    /// usage evidence, counted after the latest owner `bad`.
+    pub unused_trials: u64,
+    /// The owner rated the item `bad` at least once.
+    pub contradicted: bool,
+}
+
+impl Candidacy {
+    /// A candidate is held back to a pointer when the owner contradicted it or it went
+    /// unused in `sessions` trial sessions, until it is confirmed in `sessions` sessions.
+    /// Unused trials age out of the window, so a candidate held back only for disuse is
+    /// tried again; a contradicted one waits for confirmations. Zero disables candidacy.
+    pub fn held_back(&self, sessions: u64) -> bool {
+        sessions > 0
+            && self.confirmed < sessions
+            && (self.contradicted || self.unused_trials >= sessions)
+    }
+}
+
+const CANDIDACY_SQL: &str = "WITH cand AS (
+        SELECT t.id, COALESCE(MAX(f.at), -1) AS since, COALESCE(MAX(f.rowid), 0) AS last_bad,
+            COUNT(f.at) > 0 AS contradicted
+        FROM items t LEFT JOIN feedback f ON f.item_id = t.id AND f.verdict = 'bad'
+        WHERE t.origin = 'agent' AND t.kind <> 'law' AND t.status = 'active'
+        GROUP BY t.id
+    ),
+    used AS (
+        SELECT c.id, u.session_id FROM cand c
+        CROSS JOIN auto_usage u ON u.item_id = c.id AND u.at > c.since
+        UNION
+        SELECT c.id, a.session_id FROM cand c
+        CROSS JOIN agent_feedback a ON a.item_id = c.id AND a.verdict = 'used' AND a.at > c.since
+    ),
+    trials AS (
+        SELECT DISTINCT i.item_id AS id, i.session_id FROM injections i
+        JOIN cand c ON c.id = i.item_id
+        WHERE i.at >= ?1 AND i.at <= ?2 AND i.at > c.since
+            AND i.mode = 'full' AND i.via = 'prompt'
+    )
+    SELECT c.id, c.contradicted,
+        (SELECT COUNT(*) FROM used WHERE used.id = c.id)
+            + (SELECT COUNT(*) FROM feedback g WHERE g.item_id = c.id
+               AND g.verdict = 'good' AND g.rowid > c.last_bad),
+        (SELECT COUNT(*) FROM trials t WHERE t.id = c.id AND NOT EXISTS
+            (SELECT 1 FROM used WHERE used.id = t.id AND used.session_id = t.session_id))
+    FROM cand c";
+
+impl Store {
+    /// Candidacy of every active agent-written item, in one query. Unused trials are
+    /// counted over the last `days` days, so a held-back candidate is tried again once
+    /// its failed trials age out; confirmations and contradictions never expire.
+    /// Old or incomplete schemas leave every item without candidacy.
+    pub fn candidacies(&self, now: i64, days: u32) -> BTreeMap<String, Candidacy> {
+        let query = || -> rusqlite::Result<BTreeMap<String, Candidacy>> {
+            let mut statement = self.conn.prepare(CANDIDACY_SQL)?;
+            let rows = statement
+                .query_map(
+                    rusqlite::params![now.saturating_sub(i64::from(days) * 86400), now],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            Candidacy {
+                                contradicted: row.get(1)?,
+                                confirmed: row.get(2)?,
+                                unused_trials: row.get(3)?,
+                            },
+                        ))
+                    },
+                )?
+                .collect();
+            rows
+        };
+        query().unwrap_or_default()
+    }
+}
+
 const UNUSED_WINDOWS_SQL: &str = "WITH signals AS (
                     SELECT item_id, COUNT(*) AS full_count,
                         0 AS auto_count, 0 AS agent_count
@@ -793,6 +878,175 @@ impl Store {
         };
         query().unwrap_or_default()
     }
+}
+
+#[test]
+fn candidacy_counts_trials_confirmations_and_resets_on_bad() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::create_at(&dir.path().join("elo.db")).unwrap();
+    for (id, kind, origin) in [
+        ("A", "rule", "agent"),
+        ("U", "rule", "user"),
+        ("N", "note", "agent"),
+    ] {
+        store
+            .insert_item(&crate::store::NewItem {
+                id,
+                kind,
+                scope: "global",
+                title: "t",
+                body: "b",
+                origin,
+            })
+            .unwrap();
+    }
+    let full = |id: &str, session: &str, at: i64, via: &str| {
+        store.conn.execute(
+            "INSERT INTO injections(session_id,event_seq,item_id,mode,kind,scope,at,via) VALUES (?1,1,?2,'full','rule','global',?3,?4)",
+            rusqlite::params![session, id, at, via],
+        ).unwrap();
+    };
+    let used = |id: &str, session: &str, at: i64| {
+        store.conn.execute(
+            "INSERT INTO auto_usage(session_id,event_seq,item_id,kind,scope,at) VALUES (?1,1,?2,'rule','global',?3)",
+            rusqlite::params![session, id, at],
+        ).unwrap();
+    };
+    let rate = |id: &str, verdict: &str, at: i64| {
+        store.conn.execute(
+            "INSERT INTO feedback(item_id,verdict,kind,scope,at) VALUES (?1,?2,'rule','global',?3)",
+            rusqlite::params![id, verdict, at],
+        ).unwrap();
+    };
+    let now = 100 * 86400;
+    let get = |id: &str| store.candidacies(now, 14).remove(id);
+    // Three prompt sessions without use; a path delivery and an old one do not count.
+    for s in ["s1", "s2", "s3"] {
+        full("A", s, now - 100, "prompt");
+    }
+    full("A", "s4", now - 100, "path");
+    full("A", "s5", now - 20 * 86400, "prompt");
+    let a = get("A").unwrap();
+    assert_eq!(
+        (a.confirmed, a.unused_trials, a.contradicted),
+        (0, 3, false)
+    );
+    assert!(a.held_back(3));
+    assert!(get("U").is_none(), "owner items have no candidacy");
+    assert!(get("N").is_some(), "agent notes do");
+    // A used session is not a failed trial and counts as a confirmation.
+    used("A", "s1", now - 90);
+    let a = get("A").unwrap();
+    assert_eq!((a.confirmed, a.unused_trials), (1, 2));
+    assert!(!a.held_back(3));
+    // Two more confirmations: an agent report in another session and an owner good.
+    store.conn.execute(
+        "INSERT INTO agent_feedback(session_id,event_seq,item_id,verdict,at) VALUES ('s9',1,'A','used',?1)",
+        [now - 80],
+    ).unwrap();
+    rate("A", "good", now - 70);
+    assert_eq!(get("A").unwrap().confirmed, 3);
+    // An owner bad resets everything counted before it.
+    rate("A", "bad", now - 60);
+    let a = get("A").unwrap();
+    assert_eq!((a.confirmed, a.unused_trials, a.contradicted), (0, 0, true));
+    assert!(a.held_back(3));
+    for s in ["s6", "s7", "s8"] {
+        used("A", s, now - 50);
+    }
+    assert!(!get("A").unwrap().held_back(3));
+    assert!(!a.held_back(0), "zero disables candidacy");
+}
+
+#[test]
+fn candidacy_ignores_signals_from_the_same_second_as_a_bad() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::create_at(&dir.path().join("elo.db")).unwrap();
+    store
+        .insert_item(&crate::store::NewItem {
+            id: "A",
+            kind: "rule",
+            scope: "global",
+            title: "t",
+            body: "b",
+            origin: "agent",
+        })
+        .unwrap();
+    let now = 100 * 86400;
+    let at = now - 100;
+    store.conn.execute(
+        "INSERT INTO auto_usage(session_id,event_seq,item_id,kind,scope,at) VALUES ('s1',1,'A','rule','global',?1)",
+        [at],
+    ).unwrap();
+    store.conn.execute(
+        "INSERT INTO injections(session_id,event_seq,item_id,mode,kind,scope,at,via) VALUES ('s2',1,'A','full','rule','global',?1,'prompt')",
+        [at],
+    ).unwrap();
+    let rate = |verdict: &str| {
+        store.conn.execute(
+            "INSERT INTO feedback(item_id,verdict,kind,scope,at) VALUES ('A',?1,'rule','global',?2)",
+            rusqlite::params![verdict, at],
+        ).unwrap();
+    };
+    rate("good");
+    rate("bad");
+    let a = store.candidacies(now, 14).remove("A").unwrap();
+    assert_eq!((a.confirmed, a.unused_trials, a.contradicted), (0, 0, true));
+    assert!(a.held_back(1));
+    // A good recorded after the bad counts, even in the same second.
+    rate("good");
+    let a = store.candidacies(now, 14).remove("A").unwrap();
+    assert_eq!(a.confirmed, 1);
+    assert!(!a.held_back(1));
+}
+
+#[test]
+fn a_candidate_held_back_for_disuse_is_tried_again_once_its_trials_age_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::create_at(&dir.path().join("elo.db")).unwrap();
+    store
+        .insert_item(&crate::store::NewItem {
+            id: "A",
+            kind: "rule",
+            scope: "global",
+            title: "t",
+            body: "b",
+            origin: "agent",
+        })
+        .unwrap();
+    let day = 86400;
+    let start = 100 * day;
+    for (n, s) in ["s1", "s2", "s3"].iter().enumerate() {
+        store.conn.execute(
+            "INSERT INTO injections(session_id,event_seq,item_id,mode,kind,scope,at,via) VALUES (?1,1,'A','full','rule','global',?2,'prompt')",
+            rusqlite::params![s, start + n as i64 * day],
+        ).unwrap();
+    }
+    let at = |now: i64| store.candidacies(now, 14).remove("A").unwrap();
+    assert!(at(start + 3 * day).held_back(3));
+    // Fifteen days after the first failed trial, only two remain in the window.
+    let later = at(start + 15 * day);
+    assert_eq!((later.confirmed, later.unused_trials), (0, 2));
+    assert!(!later.held_back(3));
+}
+
+#[test]
+fn candidacy_plan_reads_usage_by_item() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::create_at(&dir.path().join("elo.db")).unwrap();
+    let plan: Vec<String> = store
+        .conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {CANDIDACY_SQL}"))
+        .unwrap()
+        .query_map(rusqlite::params![0, 1], |r| r.get::<_, String>(3))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let plan = plan.join("\n");
+    assert!(!plan.contains("SCAN u"), "{plan}");
+    assert!(!plan.contains("SCAN a"), "{plan}");
+    assert!(plan.contains("auto_usage_item"), "{plan}");
+    assert!(plan.contains("agent_feedback_item"), "{plan}");
 }
 
 #[test]

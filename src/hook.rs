@@ -646,6 +646,15 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
                 item.usage_window = windows.remove(&item.id).unwrap_or_default();
             }
         }
+        if config.workspace.candidate_sessions > 0 {
+            let mut candidacies = store.candidacies(
+                crate::store::now_seconds(),
+                config.workspace.demote_unused_days,
+            );
+            for item in &mut items {
+                item.candidacy = candidacies.remove(&item.id).unwrap_or_default();
+            }
+        }
         let mut fx = live_fixture(root, config.clone(), items);
         // The user's own word counts: only real prompts are read and counted. Counting
         // must never prevent the hook from completing.

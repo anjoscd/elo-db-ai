@@ -62,6 +62,8 @@ pub struct Item {
     pub feedback: crate::stats::Feedback,
     #[serde(skip_deserializing)]
     pub usage_window: crate::stats::UsageWindow,
+    #[serde(skip_deserializing)]
+    pub candidacy: crate::stats::Candidacy,
 }
 
 #[derive(Debug, Clone, Deserialize)]

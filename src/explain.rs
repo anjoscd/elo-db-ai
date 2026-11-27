@@ -119,6 +119,30 @@ pub fn item_report(root: &Path, config: &Config, item: &Item) -> String {
             config.workspace.demote_unused_days,
         );
         let window = windows.get(&item.id).cloned().unwrap_or_default();
+        if item.origin == crate::bench::fixture::Origin::Agent
+            && item.kind != crate::bench::fixture::Kind::Law
+        {
+            let candidacy = store
+                .candidacies(
+                    crate::store::now_seconds(),
+                    config.workspace.demote_unused_days,
+                )
+                .remove(&item.id)
+                .unwrap_or_default();
+            let sessions = config.workspace.candidate_sessions;
+            let state = if sessions == 0 {
+                "disabled"
+            } else if candidacy.confirmed >= sessions {
+                "confirmed"
+            } else if candidacy.held_back(sessions) {
+                "held back; pointer until confirmed"
+            } else {
+                "on trial"
+            };
+            let _ = writeln!(out, "candidate: {state} (confirmed sessions={}, unused trials={}, contradicted={}, limit={})",
+                candidacy.confirmed, candidacy.unused_trials,
+                if candidacy.contradicted { "yes" } else { "no" }, sessions);
+        }
         let _ = writeln!(out, "demoted (unused): {} (full events={}, auto uses={}, agent used={}, window={} days, limit={})",
             if window.demoted(item.kind, config.workspace.demote_unused_min) { "yes; pointer" } else { "no" },
             window.full_events, window.auto_used, window.agent_used, config.workspace.demote_unused_days, config.workspace.demote_unused_min);
