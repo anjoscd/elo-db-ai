@@ -43,6 +43,11 @@ fn prose(prompt: &str) -> String {
     normalize(&without_code(prompt))
 }
 
+/// Folded prompt text outside code, for counting the user's words.
+pub fn prose_text(prompt: &str) -> String {
+    prose(prompt)
+}
+
 /// Same as `prose`, keeping the original case.
 fn without_code(prompt: &str) -> String {
     let unindented: Vec<&str> = prompt
@@ -815,6 +820,10 @@ impl Selector for E1 {
                     || item.triggers.keywords.iter().any(|k| {
                         has_word(&text, k)
                             && specific_idf(k) >= SPECIFIC_NAME_MIN_IDF
+                            // A name the user types all the time does not pull a global
+                            // item into every conversation; project items keep it.
+                            && !(item.scope == "global"
+                                && fx.prompt_words.is_common(&normalize(k)))
                             && name_like_keyword(k, &names)
                     }));
             let boost = item.scope == "global" && specific && !path_hit;
@@ -2352,6 +2361,62 @@ mod tests {
         assert!(name_like_keyword("v2", &names));
         assert!(name_like_keyword("open-code-review", &names));
         assert!(!name_like_keyword("porque", &names));
+    }
+
+    #[test]
+    fn a_name_the_user_types_all_the_time_is_not_specific() {
+        for (count, full) in [(30, false), (10, true)] {
+            let (mut fx, mut ev) = prompt_fixture();
+            let base = fx.items.last().unwrap().clone();
+            fx.items = (0..15)
+                .map(|n| {
+                    let mut item = base.clone();
+                    item.id = format!("rule-{n}");
+                    item.kind = Kind::Rule;
+                    item.scope = "global".into();
+                    item.importance = 0.5;
+                    item.updated_at = ev.now.clone();
+                    item.body = "We publish on Apple first.".into();
+                    item.triggers.keywords = vec![if n == 0 { "apple" } else { "common" }.into()];
+                    item
+                })
+                .collect();
+            fx.config.workspace.full_min_score = 0.6;
+            // "apple" in 30 of 1000 prompts (3%) is common; in 10 (1%) it is not.
+            fx.prompt_words = crate::prompt_words::PromptWords {
+                total: 1000,
+                counts: BTreeMap::from([("apple".to_string(), count)]),
+            };
+            ev.prompt = Some("abre a apple".into());
+            let sel = E1.select(&fx, &ev, &mut SessionState::default());
+            assert_eq!(sel.full_ids.contains(&"rule-0".into()), full, "{count}");
+        }
+    }
+
+    #[test]
+    fn a_project_decision_keeps_a_name_the_user_types_all_the_time() {
+        let (mut fx, mut ev) = fallback_fixture(15);
+        ev.cwd = ".".into();
+        fx.config.workspace.full_min_score = 0.6;
+        for (n, item) in fx.items.iter_mut().enumerate() {
+            item.importance = 0.5;
+            item.body = "We publish on Apple first.".into();
+            item.triggers.keywords = vec![if n == 0 { "apple" } else { "common" }.into()];
+            if n == 0 {
+                item.kind = Kind::Decision;
+            }
+        }
+        fx.prompt_words = crate::prompt_words::PromptWords {
+            total: 1000,
+            counts: BTreeMap::from([("apple".to_string(), 40)]),
+        };
+        ev.prompt = Some("abre a apple".into());
+        let sel = E1.select(&fx, &ev, &mut SessionState::default());
+        assert!(
+            sel.full_ids.contains(&"rule-000".into()),
+            "{:?}",
+            sel.full_ids
+        );
     }
 
     #[test]

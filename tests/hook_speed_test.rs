@@ -21,8 +21,12 @@ fn workspace(toml: &str) -> TempDir {
 }
 
 fn run_hook(dir: &Path, stdin: &str) {
+    run_elo(dir, &["hook", "pre-tool-use", "--live"], stdin);
+}
+
+fn run_elo(dir: &Path, args: &[&str], stdin: &str) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_elo"))
-        .args(["hook", "pre-tool-use", "--live"])
+        .args(args)
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -35,6 +39,12 @@ fn run_hook(dir: &Path, stdin: &str) {
         .write_all(stdin.as_bytes())
         .unwrap();
     child.wait_with_output().unwrap();
+}
+
+fn timed(f: impl FnOnce()) -> u128 {
+    let start = Instant::now();
+    f();
+    start.elapsed().as_millis()
 }
 
 const TOML: &str = r#"
@@ -66,21 +76,29 @@ fn hook_call_is_fast() {
     for _ in 0..5 {
         run_hook(dir.path(), &input);
     }
-    let mut p95s: Vec<u128> = Vec::new();
+    // The hook's own cost: its time minus the time to start the same binary for
+    // `--version`, measured in alternation so both see the same machine load.
+    // Starting any process can take 75 ms or more on a loaded machine, which says
+    // nothing about the hook.
+    let mut costs: Vec<i128> = Vec::new();
     for _ in 0..3 {
-        let mut times: Vec<u128> = (0..20)
-            .map(|_| {
-                let start = Instant::now();
-                run_hook(dir.path(), &input);
-                start.elapsed().as_millis()
-            })
-            .collect();
-        times.sort();
-        p95s.push(times[18]);
+        let mut hook: Vec<u128> = Vec::new();
+        let mut start: Vec<u128> = Vec::new();
+        for _ in 0..20 {
+            hook.push(timed(|| run_hook(dir.path(), &input)));
+            start.push(timed(|| run_elo(dir.path(), &["--version"], "")));
+        }
+        hook.sort();
+        start.sort();
+        costs.push(hook[18] as i128 - start[18] as i128);
+        eprintln!(
+            "pre-tool-use p95 {} ms, process start p95 {} ms",
+            hook[18], start[18]
+        );
     }
-    p95s.sort();
-    let p95 = p95s[0];
-    eprintln!("pre-tool-use p95 (lowest of 3 batches): {p95} ms");
-    let limit = if cfg!(debug_assertions) { 300 } else { 100 };
-    assert!(p95 < limit, "p95 {p95} ms");
+    costs.sort();
+    let cost = costs[1];
+    eprintln!("pre-tool-use own cost at p95 (median of 3 batches): {cost} ms");
+    let limit = if cfg!(debug_assertions) { 200 } else { 50 };
+    assert!(cost < limit, "hook cost {cost} ms");
 }

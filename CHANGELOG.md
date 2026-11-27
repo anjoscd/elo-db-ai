@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.7]
+
+### Changed
+
+- A name the user types all the time no longer makes a match specific on its own. The hook now keeps a count of the words in the user's real prompts (folded words and counts only, never prompt text; agent-runtime messages and code are left out) in an optional `prompt_words` table created on first use, so the schema version does not change. The first time, it counts the prompts already in the shadow log. Once at least 500 prompts are counted, a word found in 1.4% of them and in at least 10 ("Apple", "iPhone", "Android" in real use) needs a second keyword to promote a global item; project items are unchanged. A compound keyword is common when every part is. Counting is off while `[shadow] enabled = false`, runs in a write transaction (two hooks at once seed once and never lose a count), and the hook reads only the counts of words that are part of an item keyword. On 720 real prompts since 0.3.6, 9 noisy full deliveries went away and 5 came in, 4 of them relevant.
+- `elo bench --replay` skips agent-runtime messages, as the hook does, and uses the replayed log for the word counts.
+
 ## [0.3.6]
 
 ### Changed

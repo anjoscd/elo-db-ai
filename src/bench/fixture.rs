@@ -99,6 +99,8 @@ pub struct Fixture {
     pub items: Vec<Item>,
     pub events: Vec<Event>,
     pub split: Split,
+    /// How often words appear in the user's real prompts (live only; empty in fixtures).
+    pub prompt_words: crate::prompt_words::PromptWords,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -193,6 +195,7 @@ pub fn load_fixture(dir: impl AsRef<Path>) -> Result<Fixture, FixtureError> {
         items: jsonl(&dir.join("items.jsonl"))?,
         events: jsonl(&dir.join("events.jsonl"))?,
         split: parse(&read(&dir.join("split.json"))?, &dir.join("split.json"), 0)?,
+        prompt_words: Default::default(),
     };
     fixture.validate()?;
     Ok(fixture)

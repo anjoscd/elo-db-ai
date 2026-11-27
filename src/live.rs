@@ -120,5 +120,6 @@ pub fn live_fixture(root: &Path, config: Config, items: Vec<Item>) -> Fixture {
             dev: Vec::new(),
             test: Vec::new(),
         },
+        prompt_words: Default::default(),
     }
 }

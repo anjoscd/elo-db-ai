@@ -388,7 +388,7 @@ fn log_error(root: &Path, message: &str) {
 
 /// Prompts that come from the agent runtime (subagent messages, system reminders,
 /// notifications, etc.) carry many unrelated keywords and must not trigger rules.
-fn is_automatic_prompt(prompt: &str) -> bool {
+pub fn is_automatic_prompt(prompt: &str) -> bool {
     let trimmed = prompt.trim_start();
     [
         "<agent-message",
@@ -646,8 +646,31 @@ fn run(root: &Path, event_name: &str, input: &HookInput) -> Result<Option<String
                 item.usage_window = windows.remove(&item.id).unwrap_or_default();
             }
         }
-        let fx = live_fixture(root, config.clone(), items);
+        let mut fx = live_fixture(root, config.clone(), items);
+        // The user's own word counts: only real prompts are read and counted. Counting
+        // must never prevent the hook from completing.
+        // Like the shadow log, it is kept only while shadow telemetry is enabled.
+        let prompt_words = ev
+            .prompt
+            .as_deref()
+            .filter(|p| {
+                config.shadow.enabled && event_name == "user-prompt-submit" && !p.trim().is_empty()
+            })
+            .map(crate::prompt_words::words_of);
+        if let Some(words) = &prompt_words {
+            let _ = crate::prompt_words::seed_if_missing(&mut store.conn, root);
+            // Only words that are (part of) an item keyword can matter to the selector.
+            let keywords = crate::prompt_words::keyword_parts(&fx.items);
+            let needed: std::collections::BTreeSet<String> =
+                words.intersection(&keywords).cloned().collect();
+            if let Ok(counts) = crate::prompt_words::load(&store.conn, &needed) {
+                fx.prompt_words = counts;
+            }
+        }
         let mut selection = E1.select(&fx, &ev, &mut session.state);
+        if let Some(words) = &prompt_words {
+            let _ = crate::prompt_words::record(&mut store.conn, words);
+        }
         let seq = i64::try_from(session.seq).unwrap_or(i64::MAX);
         let rendered = render(&fx, &ev, &selection);
         selection.used_bytes = rendered.len();

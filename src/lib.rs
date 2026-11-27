@@ -19,6 +19,7 @@ pub mod live;
 pub mod maintain;
 pub mod map;
 pub mod mcp;
+pub mod prompt_words;
 pub mod recall;
 pub mod recipe;
 pub mod stats;

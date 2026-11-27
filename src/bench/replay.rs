@@ -20,6 +20,9 @@ struct Record {
     tool_paths: Option<Vec<String>>,
     #[serde(default = "prompt_event")]
     event_type: String,
+    /// Agent-runtime messages are logged but, as in the hook, never select by prompt.
+    #[serde(default)]
+    automatic: bool,
 }
 
 fn prompt_event() -> String {
@@ -41,7 +44,27 @@ pub fn run(log: &Path) -> Result<String, String> {
     let config = hook::config_for(&root, &found).map_err(|_| "invalid configuration")?;
     let store = Store::open_read_only(&root).map_err(|_| "could not open the store for reading")?;
     let items = live::load_items(&store).map_err(|_| "could not load the items")?;
-    let fx = live::live_fixture(&root, config, items);
+    let mut fx = live::live_fixture(&root, config, items);
+    // The user's word counts, taken from the whole log being replayed (evaluation only).
+    let file = std::fs::File::open(&log).map_err(|_| "could not open the log")?;
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let real = !value
+            .get("automatic")
+            .and_then(|a| a.as_bool())
+            .unwrap_or(false);
+        if let (true, Some(prompt)) = (real, value.get("prompt").and_then(|p| p.as_str())) {
+            if prompt.trim().is_empty() || hook::is_automatic_prompt(prompt) {
+                continue;
+            }
+            fx.prompt_words.total += 1;
+            for word in crate::prompt_words::words_of(prompt) {
+                *fx.prompt_words.counts.entry(word).or_default() += 1;
+            }
+        }
+    }
     let file = std::fs::File::open(log).map_err(|_| "could not open the log")?;
     aggregate(&fx, std::io::BufReader::new(file), &found.worktrees)
 }
@@ -86,7 +109,9 @@ pub fn aggregate(
             family: "replay".into(),
             event_seq: record.event_seq,
             cwd,
-            prompt: record.prompt,
+            prompt: record
+                .prompt
+                .filter(|p| !record.automatic && !hook::is_automatic_prompt(p)),
             tool_paths: record.tool_paths,
             now: record.at,
             allowed_scopes: vec![],
