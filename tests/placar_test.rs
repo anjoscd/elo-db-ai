@@ -122,8 +122,10 @@ fn write_failure_is_silent_and_nonblocking() {
     store.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
     let start = std::time::Instant::now();
     event(&dir, "Edit", json!({"file_path":"src/a.rs"}));
-    // The placar waits at most 100 ms (busy_timeout) for a parallel writer, then drops.
-    assert!(start.elapsed().as_millis() < 500, "{:?}", start.elapsed());
+    // The placar waits at most 100 ms (busy_timeout) per write for a parallel writer,
+    // then drops. A blocking open would wait 5 s; 2 s leaves room for slow CI runners
+    // (650 ms measured on a hosted macOS runner) and still catches a hook that blocks.
+    assert!(start.elapsed().as_millis() < 2000, "{:?}", start.elapsed());
     store.conn.execute_batch("ROLLBACK").unwrap();
     assert_eq!(store.stats(None, GroupBy::Kind).unwrap().auto_used, 0);
     assert!(!dir.path().join(".elo/shadow/errors.log").exists());
